@@ -32,7 +32,9 @@ export function Panel({
       )}
     >
       {(title || action) && (
-        <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
+        // Wraps so a wide action toolbar drops below the title instead of
+        // forcing the panel wider than its column.
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
           <div className="flex min-w-0 items-center gap-2.5">
             {icon && <span className="text-primary">{icon}</span>}
             <div className="min-w-0">
@@ -44,7 +46,7 @@ export function Panel({
               )}
             </div>
           </div>
-          {action && <div className="shrink-0">{action}</div>}
+          {action && <div className="min-w-0 shrink-0 max-sm:w-full">{action}</div>}
         </header>
       )}
       <div className={cn("p-4 sm:p-5", bodyClassName)}>{children}</div>

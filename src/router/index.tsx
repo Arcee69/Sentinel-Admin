@@ -9,6 +9,7 @@ import Intelligence from "../pages/Intelligence";
 import Operations from "../pages/Operations";
 import Communications from "../pages/Communications";
 import CommandCenter from "../pages/CommandCenter";
+import Elections from "../pages/Elections";
 import Reports from "../pages/Reports";
 import Agents from "../pages/Agents";
 import AgentDetail from "../pages/AgentDetail";
@@ -29,6 +30,7 @@ export default function Routers() {
           <Route path="/operations" element={<Operations />} />
           <Route path="/communications" element={<Communications />} />
           <Route path="/command" element={<CommandCenter />} />
+          <Route path="/elections" element={<Elections />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:agentId" element={<AgentDetail />} />
