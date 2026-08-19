@@ -9,7 +9,6 @@ import {
   Link2,
   RefreshCw,
   Search,
-  ShieldCheck,
   UsersRound,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -281,7 +280,7 @@ export default function Elections() {
           }
         >
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="w-full min-w-190 text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
                   <th className="px-4 py-2 font-medium">Race</th>
@@ -462,7 +461,7 @@ export default function Elections() {
           <ol className="relative space-y-4 border-l border-border pl-6">
             {MILESTONES.map((m) => (
               <li key={m.id} className="relative">
-                <span className="absolute -left-[31px] top-0.5 grid h-4 w-4 place-items-center rounded-full bg-background">
+                <span className="absolute -left-7.75 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-background">
                   {m.completed ? (
                     <CircleCheck className="h-4 w-4 text-success" />
                   ) : (
