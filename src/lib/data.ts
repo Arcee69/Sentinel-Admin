@@ -1064,13 +1064,181 @@ export const AGENTS: Agent[] = [
 /* ------------------------------------------------------------------ */
 
 
+export const PLATFORM_ROLES = [
+  "national_admin",
+  "state_coordinator",
+  "field_agent",
+  "observer",
+] as const;
+
+export type PlatformRole = (typeof PLATFORM_ROLES)[number];
+
+export const ROLE_LABELS: Record<PlatformRole, string> = {
+  national_admin: "National Admin",
+  state_coordinator: "State Coordinator",
+  field_agent: "Field Agent",
+  observer: "Observer",
+};
+
 export const PERMISSIONS = [
-  { capability: "View all states", admin: true, state: false, agent: false },
-  { capability: "Create campaigns", admin: true, state: false, agent: false },
-  { capability: "Manage agents", admin: true, state: true, agent: false },
-  { capability: "Submit field reports", admin: true, state: true, agent: true },
-  { capability: "Flag incidents", admin: true, state: true, agent: true },
-  { capability: "Send distribution", admin: true, state: true, agent: false },
+  { capability: "View all states", admin: true, state: false, agent: false, observer: true },
+  { capability: "Create campaigns", admin: true, state: false, agent: false, observer: false },
+  { capability: "Manage users & roles", admin: true, state: false, agent: false, observer: false },
+  { capability: "Manage agents", admin: true, state: true, agent: false, observer: false },
+  { capability: "Submit field reports", admin: true, state: true, agent: true, observer: false },
+  { capability: "Flag incidents", admin: true, state: true, agent: true, observer: false },
+  { capability: "Send distribution", admin: true, state: true, agent: false, observer: false },
+];
+
+/* Permission simulator ---------------------------------------------- */
+
+export type DataAccess = "none" | "view" | "edit";
+export type DataScope = "all" | "state" | "own";
+
+export interface AccessRule {
+  access: DataAccess;
+  scope: DataScope;
+}
+
+export const DATA_ACCESS_LEVELS: DataAccess[] = ["none", "view", "edit"];
+
+export const ACCESS_LABELS: Record<DataAccess, string> = {
+  none: "No access",
+  view: "View",
+  edit: "View & edit",
+};
+
+export const SCOPE_LABELS: Record<DataScope, string> = {
+  all: "All states",
+  state: "Own state",
+  own: "Own records",
+};
+
+export const DATA_AREAS = [
+  { key: "campaigns", label: "Campaigns" },
+  { key: "campaign_activities", label: "Campaign activities" },
+  { key: "incidents", label: "Incidents" },
+  { key: "field_reports", label: "Field reports" },
+  { key: "field_tasks", label: "Field tasks" },
+  { key: "polling_units", label: "Polling units & turnout" },
+  { key: "broadcasts", label: "Distribution messages" },
+  { key: "users", label: "Users & roles" },
+  { key: "audit", label: "Audit log" },
+] as const;
+
+export type DataAreaKey = (typeof DATA_AREAS)[number]["key"];
+
+export type RolePolicy = Record<DataAreaKey, AccessRule>;
+
+/** The access policy each role holds today. */
+export const ROLE_POLICIES: Record<PlatformRole, RolePolicy> = {
+  national_admin: Object.fromEntries(
+    DATA_AREAS.map((a) => [a.key, { access: "edit", scope: "all" }]),
+  ) as RolePolicy,
+  state_coordinator: {
+    campaigns: { access: "view", scope: "all" },
+    campaign_activities: { access: "edit", scope: "state" },
+    incidents: { access: "edit", scope: "state" },
+    field_reports: { access: "edit", scope: "state" },
+    field_tasks: { access: "edit", scope: "state" },
+    polling_units: { access: "edit", scope: "state" },
+    broadcasts: { access: "edit", scope: "state" },
+    users: { access: "none", scope: "state" },
+    audit: { access: "none", scope: "state" },
+  },
+  field_agent: {
+    campaigns: { access: "view", scope: "all" },
+    campaign_activities: { access: "view", scope: "state" },
+    incidents: { access: "edit", scope: "state" },
+    field_reports: { access: "edit", scope: "own" },
+    field_tasks: { access: "view", scope: "own" },
+    polling_units: { access: "edit", scope: "state" },
+    broadcasts: { access: "view", scope: "state" },
+    users: { access: "none", scope: "own" },
+    audit: { access: "none", scope: "own" },
+  },
+  observer: {
+    campaigns: { access: "view", scope: "all" },
+    campaign_activities: { access: "view", scope: "all" },
+    incidents: { access: "view", scope: "all" },
+    field_reports: { access: "view", scope: "all" },
+    field_tasks: { access: "view", scope: "all" },
+    polling_units: { access: "view", scope: "all" },
+    broadcasts: { access: "view", scope: "all" },
+    users: { access: "none", scope: "all" },
+    audit: { access: "none", scope: "all" },
+  },
+};
+
+/* Admins & users ---------------------------------------------------- */
+
+export interface PlatformUser {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  role: PlatformRole;
+  /** `null` = all states / unassigned. */
+  assignedState: string | null;
+  /** ISO timestamp, or `null` if the user has never signed in. */
+  lastLoginAt: string | null;
+}
+
+export const PLATFORM_USERS: PlatformUser[] = [
+  {
+    id: "u1",
+    fullName: "A. Olamide",
+    email: "a.olamide@smhp.ng",
+    phone: null,
+    role: "national_admin",
+    assignedState: null,
+    lastLoginAt: "2026-10-14T07:42:00+01:00",
+  },
+  {
+    id: "u2",
+    fullName: "Chinedu Okafor",
+    email: "c.okafor@smhp.ng",
+    phone: "08031234567",
+    role: "state_coordinator",
+    assignedState: "Anambra",
+    lastLoginAt: "2026-10-13T18:05:00+01:00",
+  },
+  {
+    id: "u3",
+    fullName: "Aisha Bello",
+    email: "a.bello@smhp.ng",
+    phone: "08069876543",
+    role: "state_coordinator",
+    assignedState: "Kano",
+    lastLoginAt: "2026-10-14T06:58:00+01:00",
+  },
+  {
+    id: "u4",
+    fullName: "Tunde Adeyemi",
+    email: "t.adeyemi@smhp.ng",
+    phone: "08025557788",
+    role: "state_coordinator",
+    assignedState: "Lagos",
+    lastLoginAt: "2026-10-12T21:14:00+01:00",
+  },
+  {
+    id: "u5",
+    fullName: "Blessing Eze",
+    email: "b.eze@smhp.ng",
+    phone: "07034441122",
+    role: "field_agent",
+    assignedState: "Rivers",
+    lastLoginAt: "2026-10-14T08:10:00+01:00",
+  },
+  {
+    id: "u6",
+    fullName: "Musa Ibrahim",
+    email: "m.ibrahim@smhp.ng",
+    phone: null,
+    role: "observer",
+    assignedState: null,
+    lastLoginAt: null,
+  },
 ];
 
 export const NOTIFICATION_PREFS = [

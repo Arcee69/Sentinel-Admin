@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "../../lib/cn";
@@ -32,6 +32,11 @@ export function Modal({
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusTo = useRef<HTMLElement | null>(null);
 
+  // Always calls the latest `onClose` without making it an effect dependency.
+  // Callers often pass a fresh function each render; if that re-ran the effect
+  // below, every keystroke in a form would steal focus back to the first field.
+  const requestClose = useEffectEvent(() => onClose());
+
   useEffect(() => {
     if (!open) return;
 
@@ -47,7 +52,7 @@ export function Modal({
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        requestClose();
         return;
       }
 
@@ -78,7 +83,7 @@ export function Modal({
       document.removeEventListener("keydown", onKeyDown);
       restoreFocusTo.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
