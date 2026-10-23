@@ -12,8 +12,8 @@ import { CAMPAIGNS } from "../lib/campaigns";
 import { useAuth } from "../context/AuthContext";
 
 export default function SettingsPage() {
-  const { user } = useAuth();
-  const isAdmin = user?.role === ROLE_LABELS.national_admin;
+  const { access } = useAuth();
+  const isAdmin = access?.role === "admin";
 
   const [prefs, setPrefs] = useState(NOTIFICATION_PREFS);
   // No campaigns API yet — created and edited campaigns live for the session.

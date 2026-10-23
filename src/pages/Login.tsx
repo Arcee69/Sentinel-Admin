@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRight,
@@ -14,21 +14,33 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/Button";
 import { Input, Label } from "../components/ui/Field";
+import { errorMessage, toApiError, type FieldErrors } from "../services/errors";
 
 export default function Login() {
   const navigate = useNavigate();
-  const { signIn } = useAuth();
+  const location = useLocation();
+  const { signIn, isAuthenticated } = useAuth();
 
-  const [email, setEmail] = useState("a.olamide@smhp.ng");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+
+  const from = (location.state as { from?: string } | null)?.from;
+  const destination = from && from !== "/" ? from : "/dashboard";
+
+  // Signing in from the form navigates explicitly; this covers a revisit while signed in.
+  if (isAuthenticated && !busy) {
+    return <Navigate to={destination} replace />;
+  }
 
   async function handleSignIn(e: FormEvent) {
     e.preventDefault();
     setError("");
+    setFieldErrors({});
 
     if (!email.trim() || !password.trim()) {
       setError("Enter both your email and password to continue.");
@@ -36,9 +48,19 @@ export default function Login() {
     }
 
     setBusy(true);
-    await new Promise((r) => setTimeout(r, 650));
-    signIn(email);
-    navigate("/dashboard", { replace: true });
+    try {
+      await signIn(email.trim(), password, remember);
+      navigate(destination, { replace: true });
+    } catch (err) {
+      const apiError = toApiError(err);
+      if (apiError.isValidation && Object.keys(apiError.fieldErrors).length) {
+        setFieldErrors(apiError.fieldErrors);
+      } else {
+        setError(errorMessage(apiError));
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -126,34 +148,28 @@ export default function Login() {
           Enter your credentials to continue.
         </p>
 
-        <form onSubmit={handleSignIn} className="mt-6 space-y-4">
+        <form onSubmit={handleSignIn} className="mt-6 space-y-4" noValidate>
           <div className="space-y-1.5">
             <Label htmlFor="email">Email or Phone</Label>
             <div className="relative">
               <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 id="email"
-                type="email"
+                type="text"
+                inputMode="email"
                 autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@smhp.ng"
                 className="h-11 pl-9"
+                aria-invalid={!!fieldErrors.email}
               />
             </div>
+            <FieldError message={fieldErrors.email} />
           </div>
 
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="password">Password</Label>
-              <button
-                type="button"
-                onClick={() => setError("Contact your National Admin to reset.")}
-                className="cursor-pointer text-[11px] text-primary hover:underline"
-              >
-                Forgot?
-              </button>
-            </div>
+            <Label htmlFor="password">Password</Label>
             <div className="relative">
               <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -174,6 +190,7 @@ export default function Login() {
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
+            <FieldError message={fieldErrors.password} />
           </div>
 
           <div className="flex items-center justify-between">
@@ -199,7 +216,7 @@ export default function Login() {
             ) : (
               <ArrowRight className="h-4 w-4" />
             )}
-            Sign in
+            {busy ? "Signing in…" : "Sign in"}
           </Button>
         </form>
 
@@ -219,6 +236,11 @@ export default function Login() {
       </div>
     </div>
   );
+}
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="text-[11px] text-destructive">{message}</p>;
 }
 
 function ErrorNote({ message }: { message: string }) {

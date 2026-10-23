@@ -1,19 +1,23 @@
 import { BrowserRouter } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { Toaster } from "sonner";
 import { AuthProvider } from "./context/AuthContext";
 import { FilterProvider } from "./context/FilterContext";
 import { RosterProvider } from "./context/RosterContext";
 import { TasksProvider } from "./context/TasksContext";
+import { queryClient } from "./lib/queryClient";
 import Routers from "./router";
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <FilterProvider>
-          <RosterProvider>
-            <TasksProvider>
-              <Routers />
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <AuthProvider>
+          <FilterProvider>
+            <RosterProvider>
+              <TasksProvider>
+                <Routers />
                 <Toaster
                   theme="dark"
                   position="top-right"
@@ -25,11 +29,13 @@ function App() {
                     },
                   }}
                 />
-            </TasksProvider>
-          </RosterProvider>
-        </FilterProvider>
-      </AuthProvider>
-    </BrowserRouter>
+              </TasksProvider>
+            </RosterProvider>
+          </FilterProvider>
+        </AuthProvider>
+      </BrowserRouter>
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+    </QueryClientProvider>
   );
 }
 

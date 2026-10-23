@@ -3,23 +3,24 @@ import { useNavigate } from "react-router-dom";
 import { Bell, LogOut, Menu, Search, ShieldCheck } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useFilters } from "../context/FilterContext";
-import { useScopedData } from "../hooks/useScopedData";
-import { ALL_STATES, CAMPAIGNS } from "../lib/campaigns";
+import { useCampaignAlerts } from "../hooks/api/useDashboard";
+import { useUnitNames } from "../hooks/useUnitNames";
+import { describeAlert, sortAlerts } from "../lib/alerts";
+import { relativeTime } from "../lib/format";
 import { FilterMenu } from "./FilterMenu";
 import { Avatar } from "./ui/Avatar";
 import { cn } from "../lib/cn";
 
-const SEVERITY_DOT = {
-  critical: "bg-destructive",
-  high: "bg-warning",
-  medium: "bg-info",
-  low: "bg-accent",
-} as const;
+/** Picker value for "no state selected". */
+const WHOLE_CAMPAIGN = "__campaign__";
 
 export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const { user, signOut } = useAuth();
-  const { campaign, scope, scopeLabel, availableStates, setCampaign, setScope } = useFilters();
-  const { criticalAlerts } = useScopedData();
+  const { apiCampaign, campaigns, setCampaign, stateUnits, scopeUnit, scopeLabel, setScopeUnit } =
+    useFilters();
+  const alertsQuery = useCampaignAlerts(apiCampaign?.id);
+  const unitName = useUnitNames();
+  const alerts = sortAlerts(alertsQuery.data?.items ?? []);
   const navigate = useNavigate();
   const [notifOpen, setNotifOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -61,29 +62,30 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
       <div className="order-last flex w-full min-w-0 items-center gap-2 sm:order-none sm:w-auto">
         <FilterMenu
           caption="Campaign"
-          value={campaign.id}
-          valueLabel={campaign.name}
+          value={apiCampaign?.id ?? ""}
+          valueLabel={apiCampaign?.name ?? "No campaign"}
           onChange={setCampaign}
-          options={CAMPAIGNS.map((c) => ({
+          searchable={campaigns.length > 8}
+          options={campaigns.map((c) => ({
             value: c.id,
             label: c.name,
-            hint: `${c.party} · ${c.cycle} · ${c.scopeLabel}`,
+            hint: [c.party, c.cycle, c.office].filter(Boolean).join(" · "),
           }))}
         />
 
         <FilterMenu
           caption="Scope"
-          value={scope}
+          value={scopeUnit?.id ?? WHOLE_CAMPAIGN}
           valueLabel={scopeLabel}
-          onChange={setScope}
-          searchable={availableStates.length > 8}
+          onChange={(v) => setScopeUnit(v === WHOLE_CAMPAIGN ? null : v)}
+          searchable={stateUnits.length > 8}
           options={[
             {
-              value: ALL_STATES,
-              label: campaign.states ? campaign.scopeLabel : "All States",
-              hint: `${availableStates.length} state${availableStates.length === 1 ? "" : "s"} in this campaign`,
+              value: WHOLE_CAMPAIGN,
+              label: "All States",
+              hint: `${stateUnits.length} state${stateUnits.length === 1 ? "" : "s"} in this campaign`,
             },
-            ...availableStates.map((s) => ({ value: s, label: s })),
+            ...stateUnits.map((s) => ({ value: s.id, label: s.name })),
           ]}
         />
       </div>
@@ -115,7 +117,7 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
           >
             <Bell className="h-4.5 w-4.5" />
             <span className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
-              {criticalAlerts.length}
+              {alerts.length}
             </span>
           </button>
 
@@ -126,23 +128,41 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
                 <p className="text-[10px] text-muted-foreground">Auto-flagged by Sentinel AI</p>
               </div>
               <ul className="max-h-80 divide-y divide-border overflow-y-auto">
-                {criticalAlerts.map((a) => (
-                  <li key={a.id} className="flex gap-2.5 px-4 py-3 hover:bg-secondary/40">
-                    <span
-                      className={cn(
-                        "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
-                        SEVERITY_DOT[a.severity],
-                      )}
-                    />
-                    <div className="min-w-0">
-                      <p className="text-[12px] font-medium leading-snug">{a.title}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">{a.detail}</p>
-                    </div>
-                    <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
-                      {a.time}
-                    </span>
+                {alertsQuery.isLoading && (
+                  <li className="px-4 py-6 text-center text-[11px] text-muted-foreground">
+                    Loading alerts…
                   </li>
-                ))}
+                )}
+                {alertsQuery.isError && (
+                  <li className="px-4 py-6 text-center text-[11px] text-destructive">
+                    Couldn't load alerts.
+                  </li>
+                )}
+                {alertsQuery.isSuccess && alerts.length === 0 && (
+                  <li className="px-4 py-6 text-center text-[11px] text-muted-foreground">
+                    No open alerts.
+                  </li>
+                )}
+                {alerts.map((a) => {
+                  const d = describeAlert(a, unitName(a.geographic_unit_id));
+                  return (
+                    <li
+                      key={`${a.type}:${a.target_id}`}
+                      className="flex gap-2.5 px-4 py-3 hover:bg-secondary/40"
+                    >
+                      <span
+                        className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", d.severity.dot)}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-medium leading-snug">{d.title}</p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">{d.detail}</p>
+                      </div>
+                      <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
+                        {relativeTime(a.occurred_at)}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -157,7 +177,7 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
             }}
             className="flex cursor-pointer items-center gap-2.5 rounded-lg py-1 pl-1 pr-2 transition-colors hover:bg-secondary"
           >
-            <Avatar initials={user?.initials ?? "AO"} className="h-8 w-8" />
+            <Avatar initials={user?.initials ?? "?"} className="h-8 w-8" />
             <span className="hidden text-left leading-tight sm:block">
               <span className="block text-[12px] font-semibold">{user?.name}</span>
               <span className="block text-[10px] text-muted-foreground">{user?.role}</span>

@@ -139,8 +139,10 @@ export type ParticipationRole =
 /** Map the session's display role onto the participation vocabulary. */
 export function participationRole(role: string | undefined): ParticipationRole {
   const r = (role ?? "").toLowerCase();
-  if (r.includes("national")) return "national_admin";
-  if (r.includes("coordinator") || r.includes("state")) return "state_coordinator";
+  // API roles (admin/manager/observer/agent) map onto the participation tiers.
+  if (r.includes("national") || r.includes("admin")) return "national_admin";
+  if (r.includes("coordinator") || r.includes("state") || r.includes("manager"))
+    return "state_coordinator";
   if (r.includes("analyst")) return "analyst";
   if (r.includes("observer") || r.includes("auditor") || r.includes("guest")) return "observer";
   return "field_agent";
