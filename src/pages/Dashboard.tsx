@@ -31,7 +31,8 @@ import { useNow } from "../hooks/useNow";
 import { formatReach } from "../hooks/useScopedData";
 import { describeAlert, sortAlerts } from "../lib/alerts";
 import { humanize, isoDay, parseApiDate, relativeTime } from "../lib/format";
-import { STATE_ACTIVITY, type StateActivity, type Trend } from "../lib/data";
+import { STATE_ACTIVITY, type Trend } from "../lib/data";
+import { toStateActivity } from "../lib/stateShapes";
 import type { CampaignAnalytics } from "../services/dashboard";
 import { cn } from "../lib/cn";
 
@@ -79,16 +80,6 @@ function describeEvent(eventType: string) {
   );
 }
 
-/** "Lagos State", "LAGOS", "FCT - Abuja" → one key, to join API states to map shapes. */
-function stateKey(name: string): string {
-  const s = name.toLowerCase().replace(/\bstate\b/g, "").replace(/[^a-z]/g, "");
-  if (s.includes("fct") || s.includes("abuja") || s.includes("federalcapital")) return "fct";
-  return s;
-}
-
-// `Map` here is the lucide icon, so use the global constructor explicitly.
-const SHAPES_BY_KEY = new globalThis.Map(STATE_ACTIVITY.map((s) => [stateKey(s.name), s]));
-
 /** Field + polling reports for one day of the analytics window. */
 function reportsOn(analytics: CampaignAnalytics | undefined, day: string): number {
   if (!analytics) return 0;
@@ -130,27 +121,16 @@ export default function Dashboard() {
   const criticalAlerts = sortAlerts(alertsQuery.data?.items ?? []);
   const activityStream = activity.data?.pages[0]?.items ?? [];
 
-  // API states joined to map shapes by name. A state with no shape (e.g. in
-  // a demo geography) is left off rather than drawn in the wrong place.
-  const { states, isNationwide } = useMemo(() => {
-    const rows = analytics.data?.field_activity_by_state ?? [];
-    const joined: StateActivity[] = [];
-    for (const r of rows) {
-      if (scopeUnit && r.geographic_unit_id !== scopeUnit.id) continue;
-      const shape = SHAPES_BY_KEY.get(stateKey(r.name));
-      if (shape) {
-        joined.push({
-          ...shape,
-          activity: r.reports,
-          reports: r.reports,
-          reach: 0,
-          agents: 0,
-          sentiment: 0,
-        });
-      }
-    }
-    return { states: joined, isNationwide: !scopeUnit };
-  }, [analytics.data, scopeUnit]);
+  // States the map has no shape for (e.g. a demo geography) are left off
+  // rather than drawn in the wrong place.
+  const states = useMemo(
+    () =>
+      toStateActivity(analytics.data?.field_activity_by_state ?? [], {
+        onlyUnitId: scopeUnit?.id,
+      }),
+    [analytics.data, scopeUnit],
+  );
+  const isNationwide = !scopeUnit;
 
   const o = overview.data;
   const reportsToday = reportsOn(analytics.data, range.to);

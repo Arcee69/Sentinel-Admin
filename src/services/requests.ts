@@ -53,6 +53,25 @@ export const getMethod = async <T = unknown, M = Record<string, unknown>>(
 export const getList = <T = unknown>(url: string, query?: Query, config?: AxiosRequestConfig) =>
   getMethod<T[], PageMeta>(url, query, config);
 
+/**
+ * Every page of a paginated list, concatenated. For lists the screen shows
+ * whole (task board, roster); `maxPages` caps a runaway list.
+ */
+export async function getAllPages<T = unknown>(
+  url: string,
+  query?: Query,
+  maxPages = 20,
+): Promise<T[]> {
+  const first = await getList<T>(url, query);
+  const items = [...first.data];
+  const last = Math.min(Number(first.meta?.last_page ?? 1), maxPages);
+  for (let page = 2; page <= last; page++) {
+    const next = await getList<T>(url, { ...query, page });
+    items.push(...next.data);
+  }
+  return items;
+}
+
 export const postMethod = async <T = unknown>(
   url: string,
   payload?: unknown,

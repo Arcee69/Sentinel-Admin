@@ -16,16 +16,18 @@ import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { Input, Label, Select, Textarea } from "./ui/Field";
 import { useFilters } from "../context/FilterContext";
-import { useScopedData } from "../hooks/useScopedData";
-import { useTasks } from "../context/TasksContext";
+import { TASK_CATEGORIES, type Priority, type TaskCategory } from "../lib/data";
+import { useAssignableAgents, useCreateTask } from "../hooks/api/useOperations";
+import { useInScope, useUnitNames } from "../hooks/useUnitNames";
 import {
-  AGENTS,
-  TASK_CATEGORIES,
-  type Priority,
-  type Task,
-  type TaskCategory,
-} from "../lib/data";
-import { useRoster } from "../context/RosterContext";
+  CATEGORY_CODE,
+  PRIORITY_CODE,
+  SUBJECT_CODE,
+  dueAtFromDate,
+  formatDue,
+} from "../lib/tasks";
+import { humanize } from "../lib/format";
+import { errorMessage, toApiError } from "../services/errors";
 import { cn } from "../lib/cn";
 
 const CATEGORY_ICON: Record<TaskCategory, LucideIcon> = {
@@ -51,39 +53,46 @@ const schema = Yup.object({
   due: Yup.string().required("Set a due date."),
 });
 
+/** What the caller needs for its confirmation message. */
+export interface CreatedTaskSummary {
+  title: string;
+  category: TaskCategory;
+  assignee: string;
+  due: string;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** Locks the assignee — used when composing from an agent's own page. */
+  /** Agent membership ID; locks the assignee when composing from an agent's own page. */
   presetAgentId?: string;
-  /** Fired after the task is added, for the caller's confirmation message. */
-  onCreate?: (task: Task) => void;
+  /** Fired after the API creates the task, for the caller's confirmation message. */
+  onCreate?: (task: CreatedTaskSummary) => void;
 }
 
-/** "Wed 17 Sep" — matches the short form the seed tasks use. */
-function formatDue(iso: string): string {
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
-  if (diff === 0) return "Today";
-  if (diff === 1) return "Tomorrow";
-
-  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-}
+/** API field → form field, for placing 422 messages. */
+const FIELD_FOR: Record<string, string> = {
+  assignment_id: "assigneeId",
+  title: "title",
+  priority: "priority",
+  category: "category",
+  subject: "subject",
+  due_at: "due",
+  instructions: "notes",
+};
 
 export function NewTaskModal({ open, onClose, presetAgentId, onCreate }: Props) {
-  const { campaign } = useFilters();
-  const { agents, scopeLabel } = useScopedData();
-  const { addTask } = useTasks();
-  const { created } = useRoster();
+  const { campaign, apiCampaign, scopeLabel } = useFilters();
+  const { agents: allAgents } = useAssignableAgents(apiCampaign?.id);
+  const createTask = useCreateTask(apiCampaign?.id);
+  const inScope = useInScope();
+  const unitName = useUnitNames();
+  const agents = allAgents.filter((a) => inScope(a.geographicUnitId));
 
   // When preset, the agent may sit outside the current scope, so resolve
-  // against the whole roster rather than the scoped list.
+  // against every active assignment rather than the scoped list.
   const presetAgent = presetAgentId
-    ? [...created, ...AGENTS].find((a) => a.id === presetAgentId)
+    ? allAgents.find((a) => a.membershipId === presetAgentId)
     : undefined;
   const assignable = presetAgent ? [presetAgent] : agents;
 
@@ -99,30 +108,47 @@ export function NewTaskModal({ open, onClose, presetAgentId, onCreate }: Props) 
     },
     validationSchema: schema,
     onSubmit: async (values, helpers) => {
-      // No API yet — the pause stands in for the round trip.
-      await new Promise((r) => setTimeout(r, 550));
+      const agent = assignable.find((a) => a.membershipId === values.assigneeId);
+      if (!agent) {
+        helpers.setFieldError("assigneeId", "Assign the task to an agent.");
+        return;
+      }
 
-      const agent = assignable.find((a) => a.id === values.assigneeId)!;
+      const category = values.category as TaskCategory;
+      const dueAt = dueAtFromDate(values.due);
+      try {
+        await createTask.mutateAsync({
+          // The task inherits the geography of the agent's assignment.
+          assignment_id: agent.assignmentId,
+          title: values.title.trim(),
+          priority: PRIORITY_CODE[values.priority],
+          category: CATEGORY_CODE[category],
+          subject: SUBJECT_CODE[values.subject] ?? values.subject,
+          instructions: values.notes.trim() || undefined,
+          due_at: dueAt,
+        });
+      } catch (err) {
+        const e = toApiError(err);
+        const fields = e.fieldErrors;
+        const placed = Object.entries(fields).filter(([k]) => FIELD_FOR[k]);
+        if (e.isValidation && placed.length) {
+          for (const [k, msg] of placed) helpers.setFieldError(FIELD_FOR[k], msg);
+          helpers.setTouched(
+            Object.fromEntries(placed.map(([k]) => [FIELD_FOR[k], true])),
+            false,
+          );
+        } else {
+          helpers.setStatus(errorMessage(e));
+        }
+        return;
+      }
 
-      const task: Task = {
-        id: `t-${Date.now()}`,
+      onCreate?.({
         title: values.title.trim(),
-        category: values.category as TaskCategory,
-        subject: values.subject,
-        priority: values.priority,
+        category,
         assignee: agent.name,
-        assigneeId: agent.id,
-        // The agent carries the geography, so the task inherits it.
-        state: agent.state,
-        lga: agent.lga,
-        due: formatDue(values.due),
-        status: "Pending",
-        campaignId: campaign.id,
-        notes: values.notes.trim() || undefined,
-      };
-
-      addTask(task);
-      onCreate?.(task);
+        due: formatDue(dueAt),
+      });
 
       helpers.resetForm();
       onClose();
@@ -307,8 +333,9 @@ export function NewTaskModal({ open, onClose, presetAgentId, onCreate }: Props) 
                 </option>
               )}
               {assignable.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} — {a.role}, {a.lga} ({a.state})
+                <option key={a.membershipId} value={a.membershipId}>
+                  {a.name} — {humanize(a.duty)}
+                  {unitName(a.geographicUnitId) ? `, ${unitName(a.geographicUnitId)}` : ""}
                 </option>
               ))}
             </Select>
@@ -383,6 +410,8 @@ export function NewTaskModal({ open, onClose, presetAgentId, onCreate }: Props) 
             onBlur={formik.handleBlur}
           />
         </div>
+
+        {typeof formik.status === "string" && <ErrorText>{formik.status}</ErrorText>}
 
         <button type="submit" className="hidden" tabIndex={-1} aria-hidden />
       </form>
