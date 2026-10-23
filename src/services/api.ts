@@ -29,6 +29,12 @@ export const API = {
     tasks: (c: string) => `/campaigns/${c}/tasks`,
     fieldReports: (c: string) => `/campaigns/${c}/field-reports`,
     assignments: (c: string) => `/campaigns/${c}/assignments`,
+    broadcasts: (c: string) => `/campaigns/${c}/broadcasts`,
+  },
+
+  broadcast: {
+    show: (b: string) => `/broadcasts/${b}`,
+    publish: (b: string) => `/broadcasts/${b}/publish`,
   },
 
   task: {
