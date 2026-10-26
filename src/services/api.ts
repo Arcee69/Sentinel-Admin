@@ -30,6 +30,15 @@ export const API = {
     fieldReports: (c: string) => `/campaigns/${c}/field-reports`,
     assignments: (c: string) => `/campaigns/${c}/assignments`,
     broadcasts: (c: string) => `/campaigns/${c}/broadcasts`,
+    commandPollingUnits: (c: string) => `/campaigns/${c}/command/polling-units`,
+    incidents: (c: string) => `/campaigns/${c}/incidents`,
+    pollingReports: (c: string) => `/campaigns/${c}/polling-reports`,
+  },
+
+  incident: {
+    show: (i: string) => `/incidents/${i}`,
+    events: (i: string) => `/incidents/${i}/events`,
+    transitions: (i: string) => `/incidents/${i}/transitions`,
   },
 
   broadcast: {

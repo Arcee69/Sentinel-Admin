@@ -3,11 +3,14 @@ import { geographyApi, type GeoUnit } from "../../services/geography";
 import type { ContextCampaign } from "../../services/auth";
 
 /** Units change only when a geography version is republished. */
-const GEO_STALE = 60 * 60_000;
+export const GEO_STALE = 60 * 60_000;
+
+export const unitsKey = (versionId: string | undefined, parentId?: string | null) =>
+  ["geography", versionId, "units", parentId ?? "root"] as const;
 
 export function useGeoUnits(versionId: string | undefined, parentId?: string | null) {
   return useQuery({
-    queryKey: ["geography", versionId, "units", parentId ?? "root"],
+    queryKey: unitsKey(versionId, parentId),
     queryFn: async () =>
       (await geographyApi.units(versionId!, parentId ? { parent_id: parentId } : undefined)).data,
     enabled: !!versionId,
