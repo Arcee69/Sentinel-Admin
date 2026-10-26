@@ -3,63 +3,106 @@ import { toast } from "sonner";
 import { Panel } from "../../components/ui/Panel";
 import { Button } from "../../components/ui/Button";
 import { Select } from "../../components/ui/Field";
+import { LoadingRows } from "../../components/ui/AsyncState";
+import { ReasonDialog } from "../../components/ui/ReasonDialog";
 import { ParticipationShell } from "../../components/participation/ParticipationShell";
 import {
   ParticipationEmpty,
   ParticipationKpi,
 } from "../../components/participation/ParticipationKpi";
 import { StatusPill } from "../../components/participation/Tags";
-import { useParticipation } from "../../context/ParticipationContext";
+import { useAuth } from "../../context/AuthContext";
 import {
-  ANOMALY_LABELS,
+  usePollingUnitRows,
+  useParticipationStats,
+  useTransitionQualityCase,
+} from "../../hooks/api/useParticipation";
+import {
   ANOMALY_STATUSES,
-  canVerify,
   formatCount,
   formatRelative,
   titleCase,
   type AnomalyStatus,
 } from "../../lib/participation";
+import { errorMessage, toApiError } from "../../services/errors";
+import type { QualityCase, QualityCaseNextStatus } from "../../services/participation";
 
 const FILTERS = [...ANOMALY_STATUSES, "all"] as const;
 type Filter = (typeof FILTERS)[number];
 
 const QUEUE_LIMIT = 100;
 
+/** Quality cases can move to these; the API never sends one back to "open". */
+const NEXT_STATUSES: QualityCaseNextStatus[] = ["reviewing", "confirmed", "dismissed"];
+
+/** "PARTICIPATION_EXCEEDS_LIMIT" → "Participation exceeds limit". */
+const ruleLabel = (code: string) => titleCase(code.toLowerCase());
+
 /**
- * The analyst queue. Anomalies are raised at submission time and by
- * reconciliation — nothing here is inferred after the fact, so an empty queue
- * genuinely means nothing tripped a rule.
+ * The analyst queue. Quality cases are raised by the API's rules when a
+ * report is received — nothing here is inferred after the fact, so an empty
+ * queue genuinely means nothing tripped a rule.
  */
 export default function Anomalies() {
-  const { data, role, updateAnomaly } = useParticipation();
+  const { access } = useAuth();
+  const { qualityCases, reports, lineage, isLoading } = useParticipationStats();
+  const { rows } = usePollingUnitRows();
+  const transition = useTransitionQualityCase();
   const [filter, setFilter] = useState<Filter>("open");
-
-  const mayReview = canVerify(role);
-  const byId = useMemo(() => new Map(data.rows.map((r) => [r.id, r])), [data]);
-
-  const queue = data.anomalies.filter((a) => filter === "all" || a.status === filter);
-
-  const silent = useMemo(
-    () => data.rows.filter((r) => r.registered != null && !r.report),
-    [data],
+  const [pending, setPending] = useState<{ item: QualityCase; status: QualityCaseNextStatus } | null>(
+    null,
   );
+  const [reasonError, setReasonError] = useState<string>();
+
+  const mayReview = !!access?.can_manage;
+  const unitByReport = useMemo(
+    () => new Map(reports.map((r) => [r.id, r.polling_unit_id])),
+    [reports],
+  );
+
+  const queue = qualityCases
+    .filter((a) => filter === "all" || a.status === filter)
+    .sort((a, b) => b.detected_at.localeCompare(a.detected_at));
+
+  const silent = useMemo(() => rows.filter((r) => !r.report), [rows]);
 
   const mix = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const a of data.anomalies) {
+    for (const a of qualityCases) {
       if (a.status === "dismissed") continue;
-      counts.set(a.anomaly_type, (counts.get(a.anomaly_type) ?? 0) + 1);
+      counts.set(a.rule_code, (counts.get(a.rule_code) ?? 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [data]);
+  }, [qualityCases]);
 
-  const apply = (id: string, status: AnomalyStatus) => {
-    updateAnomaly(id, status);
-    toast.success(`Anomaly ${status}`);
-  };
+  function confirmTransition(reason: string) {
+    if (!pending) return;
+    const { item, status } = pending;
+    transition.mutate(
+      { caseId: item.id, next_status: status, reason, expected_revision: item.revision },
+      {
+        onSuccess: () => {
+          toast.success(`Anomaly ${status}`);
+          setPending(null);
+        },
+        onError: (err) => {
+          const e = toApiError(err);
+          if (e.isValidation && e.fieldErrors.reason) {
+            setReasonError(e.fieldErrors.reason);
+            return;
+          }
+          toast.error(
+            e.isConflict
+              ? "This anomaly changed since it loaded. The queue has been refreshed — try again."
+              : errorMessage(e),
+          );
+          setPending(null);
+        },
+      },
+    );
+  }
 
-  const count = (status: AnomalyStatus) =>
-    data.anomalies.filter((a) => a.status === status).length;
+  const count = (status: AnomalyStatus) => qualityCases.filter((a) => a.status === status).length;
 
   return (
     <ParticipationShell
@@ -93,7 +136,9 @@ export default function Anomalies() {
       </div>
 
       <Panel title="Anomaly mix">
-        {mix.length === 0 ? (
+        {isLoading ? (
+          <LoadingRows rows={2} padded={false} />
+        ) : mix.length === 0 ? (
           <ParticipationEmpty message="No anomalies detected." />
         ) : (
           <ul className="grid gap-2 sm:grid-cols-2">
@@ -102,7 +147,7 @@ export default function Anomalies() {
                 key={type}
                 className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2 text-xs"
               >
-                <span>{ANOMALY_LABELS[type as keyof typeof ANOMALY_LABELS] ?? titleCase(type)}</span>
+                <span>{ruleLabel(type)}</span>
                 <span className="font-semibold tabular-nums">{n}</span>
               </li>
             ))}
@@ -111,7 +156,9 @@ export default function Anomalies() {
       </Panel>
 
       <Panel title="Anomaly queue">
-        {queue.length === 0 ? (
+        {isLoading ? (
+          <LoadingRows rows={3} padded={false} />
+        ) : queue.length === 0 ? (
           <ParticipationEmpty
             message="Nothing in this queue."
             hint="Anomalies are raised at submission time and by reconciliation, never by guesswork."
@@ -119,17 +166,17 @@ export default function Anomalies() {
         ) : (
           <ul className="space-y-2">
             {queue.slice(0, QUEUE_LIMIT).map((a) => {
-              const row = a.polling_unit_id ? byId.get(a.polling_unit_id) : undefined;
+              const place = lineage(unitByReport.get(a.report_id));
               return (
                 <li key={a.id} className="rounded-lg border border-border/60 p-3 text-xs">
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusPill
                       value={a.severity}
-                      tone={["critical", "high"].includes(a.severity) ? "destructive" : "warning"}
+                      tone={
+                        ["critical", "high", "error"].includes(a.severity) ? "destructive" : "warning"
+                      }
                     />
-                    <span className="font-semibold">
-                      {ANOMALY_LABELS[a.anomaly_type] ?? titleCase(a.anomaly_type)}
-                    </span>
+                    <span className="font-semibold">{ruleLabel(a.rule_code)}</span>
                     <StatusPill
                       value={a.status}
                       tone={
@@ -145,15 +192,27 @@ export default function Anomalies() {
                     </span>
                   </div>
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    {row
-                      ? `${row.inec_pu_id} · ${row.ward}, ${row.lga}, ${row.state}`
+                    {place
+                      ? [
+                          place.unit.official_code,
+                          [place.ward?.name, place.lga?.name, place.state?.name]
+                            .filter(Boolean)
+                            .join(", "),
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
                       : "Unlinked polling unit"}{" "}
-                    — {a.detail}
+                    — {a.rule_code} rule v{a.rule_version}
                   </p>
                   {mayReview && (
                     <div className="mt-2 flex flex-wrap gap-1">
-                      {ANOMALY_STATUSES.filter((s) => s !== a.status).map((s) => (
-                        <Button key={s} size="sm" variant="ghost" onClick={() => apply(a.id, s)}>
+                      {NEXT_STATUSES.filter((s) => s !== a.status).map((s) => (
+                        <Button
+                          key={s}
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setPending({ item: a, status: s })}
+                        >
                           {titleCase(s)}
                         </Button>
                       ))}
@@ -171,7 +230,7 @@ export default function Anomalies() {
           <ParticipationEmpty message="Every polling unit with a register baseline has reported." />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[600px] text-xs">
+            <table className="w-full min-w-150 text-xs">
               <thead>
                 <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
                   <th className="py-2 pr-3 font-medium">Polling unit</th>
@@ -182,9 +241,9 @@ export default function Anomalies() {
               <tbody>
                 {silent.slice(0, QUEUE_LIMIT).map((row) => (
                   <tr key={row.id} className="border-b border-border/50 last:border-0">
-                    <td className="py-2 pr-3 font-semibold">{row.inec_pu_id}</td>
+                    <td className="py-2 pr-3 font-semibold">{row.code}</td>
                     <td className="py-2 pr-3 text-[11px] text-muted-foreground">
-                      {row.ward} · {row.lga} · {row.state}
+                      {[row.ward, row.lga, row.state].filter(Boolean).join(" · ") || "—"}
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums">
                       {formatCount(row.registered)}
@@ -196,6 +255,24 @@ export default function Anomalies() {
           </div>
         )}
       </Panel>
+
+      {pending && (
+        <ReasonDialog
+          key={`${pending.item.id}:${pending.status}`}
+          open
+          title={`Mark anomaly ${pending.status}`}
+          description={ruleLabel(pending.item.rule_code)}
+          confirmLabel={titleCase(pending.status)}
+          danger={pending.status === "confirmed"}
+          busy={transition.isPending}
+          error={reasonError}
+          onConfirm={confirmTransition}
+          onClose={() => {
+            setPending(null);
+            setReasonError(undefined);
+          }}
+        />
+      )}
     </ParticipationShell>
   );
 }

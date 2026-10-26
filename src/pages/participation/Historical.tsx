@@ -36,7 +36,7 @@ export default function Historical() {
   return (
     <ParticipationShell
       title="Historical Comparison"
-      subtitle="2015 · 2019 · 2023 official turnout against 2027 Sentinel observation"
+      subtitle="Official past results against the current observation"
     >
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {HISTORICAL_YEARS.map((year) => (

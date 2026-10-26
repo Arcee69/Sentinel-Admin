@@ -4,7 +4,7 @@ import { Info, Layers, Lock } from "lucide-react";
 import { PageHeader } from "../ui/PageHeader";
 import { cn } from "../../lib/cn";
 import { useAuth } from "../../context/AuthContext";
-import { canWrite, PARTICIPATION_NOTES, PARTICIPATION_TABS } from "../../lib/participation";
+import { PARTICIPATION_NOTES, PARTICIPATION_TABS } from "../../lib/participation";
 
 /** Geography the section drills through, in order. */
 const HIERARCHY = ["State", "LGA", "Ward", "Polling Unit"];
@@ -26,8 +26,9 @@ export function ParticipationShell({
   children: ReactNode;
 }) {
   const { pathname } = useLocation();
-  const { user } = useAuth();
-  const readOnly = !canWrite(user?.role);
+  const { access } = useAuth();
+  // Only campaign managers and admins can review or change participation records.
+  const readOnly = !access?.can_manage;
 
   return (
     <div className="space-y-4">

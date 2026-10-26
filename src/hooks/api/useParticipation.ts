@@ -19,6 +19,9 @@ import {
 } from "../../lib/participationApi";
 import type { LevelSummary } from "../../lib/participation";
 
+/** Participation figures move on polling day; the summaries refresh this often. */
+const LIVE_REFRESH = 60_000;
+
 /** Provisional counts every non-rejected report, matching the Dashboard. */
 export const PARTICIPATION_MODE: ParticipationMode = "provisional";
 
@@ -145,6 +148,7 @@ export function useNationalSummary() {
     queryFn: async () =>
       (await participationApi.summary(campaignId!, { polling_occasion_id: occasion!.id, mode })).data,
     enabled: !!campaignId && !!occasion,
+    refetchInterval: LIVE_REFRESH,
   });
 
   const rounds = useQuery({
@@ -228,6 +232,7 @@ export function useLevelRows(
         })
       ).data,
     enabled: !!campaignId && !!occasion && !!parentUnitId,
+    refetchInterval: LIVE_REFRESH,
   });
 
   const rows = useMemo<LevelSummary[]>(
