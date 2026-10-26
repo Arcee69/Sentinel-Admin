@@ -65,5 +65,13 @@ export const API = {
 
   catalog: {
     pollingOccasions: "/polling-occasions",
+    electionCycles: "/election-cycles",
+    milestones: (cycle: string) => `/election-cycles/${cycle}/milestones`,
+    contests: "/contests",
+    candidates: (contest: string) => `/contests/${contest}/candidates`,
+    parties: "/election-parties",
+    electoralDistricts: "/electoral-districts",
+    referenceSources: "/reference-sources",
+    referenceSourceDownload: (source: string) => `/reference-sources/${source}/download`,
   },
 } as const;

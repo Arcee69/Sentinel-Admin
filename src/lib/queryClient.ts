@@ -20,7 +20,12 @@ function refreshAccessOn403(error: unknown, key?: QueryKey) {
 
 export const queryClient: QueryClient = new QueryClient({
   queryCache: new QueryCache({
-    onError: (error, query) => refreshAccessOn403(error, query.queryKey),
+    // Queries that are expected to be refused for some roles opt out with
+    // `meta: { expectForbidden: true }` so they don't reload the context.
+    onError: (error, query) => {
+      if (query.meta?.expectForbidden) return;
+      refreshAccessOn403(error, query.queryKey);
+    },
   }),
   mutationCache: new MutationCache({
     onError: (error) => refreshAccessOn403(error),
