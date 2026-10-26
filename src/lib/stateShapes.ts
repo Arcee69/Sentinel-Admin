@@ -2,7 +2,7 @@ import { STATE_ACTIVITY, type StateActivity } from "./data";
 import type { StateFieldActivity } from "../services/dashboard";
 
 /** "Lagos State", "LAGOS", "FCT - Abuja" → one key, to join API states to map shapes. */
-function stateKey(name: string): string {
+export function stateKey(name: string): string {
   const s = name.toLowerCase().replace(/\bstate\b/g, "").replace(/[^a-z]/g, "");
   if (s.includes("fct") || s.includes("abuja") || s.includes("federalcapital")) return "fct";
   return s;

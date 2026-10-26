@@ -329,7 +329,7 @@ export interface Confidence {
  * Data-reliability score, not political certainty. Coverage dominates because
  * an unreported polling unit is the one gap no amount of verification closes.
  */
-function scoreConfidence(input: {
+export function scoreConfidence(input: {
   voterCoverage: number | null;
   verifiedReports: number;
   totalReports: number;

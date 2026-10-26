@@ -1,22 +1,22 @@
 import { useMemo, useState } from "react";
 import { Panel } from "../../components/ui/Panel";
+import { ErrorState, LoadingRows } from "../../components/ui/AsyncState";
 import { ParticipationShell } from "../../components/participation/ParticipationShell";
 import { MetricsTable } from "../../components/participation/MetricsTable";
 import {
   ParticipationEmpty,
   ParticipationKpi,
 } from "../../components/participation/ParticipationKpi";
-import { useParticipation } from "../../context/ParticipationContext";
+import { useFilters } from "../../context/FilterContext";
+import { useLevelRows, useNationalSummary } from "../../hooks/api/useParticipation";
+import { stateKey } from "../../lib/stateShapes";
 import { cn } from "../../lib/cn";
 import { NG_STATE_SHAPES, NG_VIEWBOX } from "../../lib/nigeriaGeo";
 import { STATE_ACTIVITY } from "../../lib/states";
 import {
   formatCount,
   formatPercent,
-  lgaRows,
   MAP_LAYERS,
-  nationalSummary,
-  stateRows,
   type LevelSummary,
   type MapLayer,
 } from "../../lib/participation";
@@ -79,13 +79,14 @@ function Choropleth({
 
   const byName = useMemo(() => {
     const map = new Map<string, LevelSummary>();
-    for (const row of states) map.set((row.state ?? row.label).toLowerCase(), row);
+    // Keyed loosely so "Lagos State" or "FCT - Abuja" from the API meets the shape name.
+    for (const row of states) map.set(stateKey(row.state ?? row.label), row);
     return map;
   }, [states]);
 
   const rowFor = (code: string) => {
     const name = NAME_BY_CODE.get(code);
-    return name ? byName.get(name.toLowerCase()) : undefined;
+    return name ? byName.get(stateKey(name)) : undefined;
   };
 
   const values = NG_STATE_SHAPES.map((s) => layerValue(rowFor(s.id), layer)).filter(
@@ -189,13 +190,21 @@ function Choropleth({
 }
 
 export default function TurnoutMap() {
-  const { data } = useParticipation();
+  const { rootUnits } = useFilters();
   const [layer, setLayer] = useState<MapLayer>("coverage");
   const [state, setState] = useState<string | null>(null);
 
-  const summary = useMemo(() => nationalSummary(data), [data]);
-  const states = useMemo(() => stateRows(data), [data]);
-  const lgas = useMemo(() => (state ? lgaRows(data, state) : []), [data, state]);
+  const national = useNationalSummary();
+  const statesQuery = useLevelRows(rootUnits[0]?.id);
+  const summary = national.summary;
+  const states = statesQuery.rows;
+  // The map reports a clicked shape's name; its row carries the unit ID to drill into.
+  const stateRow = useMemo(
+    () => (state ? states.find((r) => stateKey(r.state ?? r.label) === stateKey(state)) : undefined),
+    [states, state],
+  );
+  const lgasQuery = useLevelRows(stateRow?.key, { state: stateRow?.label });
+  const lgas = lgasQuery.rows;
 
   return (
     <ParticipationShell
@@ -205,12 +214,12 @@ export default function TurnoutMap() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <ParticipationKpi
           label="Registered voters"
-          value={formatCount(summary.registered)}
+          value={formatCount(summary?.registered)}
           provenance="inec_official"
         />
         <ParticipationKpi
           label="Voter coverage"
-          value={formatPercent(summary.metrics.voterCoverage)}
+          value={formatPercent(summary?.metrics.voterCoverage)}
           provenance="sentinel_observed"
         />
         <ParticipationKpi
@@ -219,13 +228,17 @@ export default function TurnoutMap() {
         />
         <ParticipationKpi
           label="Anomalies"
-          value={formatCount(summary.anomalies)}
-          tone={summary.anomalies ? "danger" : "default"}
+          value={formatCount(summary?.anomalies)}
+          tone={summary?.anomalies ? "danger" : "default"}
         />
       </div>
 
       <Panel title="Nigeria">
-        {states.length === 0 ? (
+        {statesQuery.isLoading || national.isLoading ? (
+          <LoadingRows rows={4} padded={false} />
+        ) : statesQuery.error ? (
+          <ErrorState error={statesQuery.error} onRetry={() => statesQuery.refetch()} />
+        ) : states.length === 0 ? (
           <ParticipationEmpty message="No polling units loaded — the map has nothing to shade yet." />
         ) : (
           <Choropleth
@@ -239,7 +252,9 @@ export default function TurnoutMap() {
 
       {state && (
         <Panel title={`LGA breakdown — ${state}`}>
-          {lgas.length ? (
+          {lgasQuery.isLoading ? (
+            <LoadingRows rows={2} padded={false} />
+          ) : lgas.length ? (
             <MetricsTable rows={lgas} levelLabel="LGA" />
           ) : (
             <ParticipationEmpty message={`No polling units recorded in ${state}.`} />

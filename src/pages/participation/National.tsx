@@ -1,6 +1,6 @@
-import { useMemo } from "react";
 import { Panel } from "../../components/ui/Panel";
 import { Select } from "../../components/ui/Field";
+import { ErrorState, LoadingRows } from "../../components/ui/AsyncState";
 import { ParticipationShell } from "../../components/participation/ParticipationShell";
 import { MetricsTable } from "../../components/participation/MetricsTable";
 import {
@@ -9,15 +9,15 @@ import {
 } from "../../components/participation/ParticipationKpi";
 import { ConfidencePill, StatusPill } from "../../components/participation/Tags";
 import { useParticipation } from "../../context/ParticipationContext";
+import { useFilters } from "../../context/FilterContext";
 import {
-  ANOMALY_LABELS,
-  formatCount,
-  formatPercent,
-  formatRelative,
-  nationalSummary,
-  stateRows,
-  titleCase,
-} from "../../lib/participation";
+  useLevelRows,
+  useNationalSummary,
+  useParticipationSetup,
+  useParticipationStats,
+  useRegisterDiscrepancies,
+} from "../../hooks/api/useParticipation";
+import { formatCount, formatPercent, formatRelative, titleCase } from "../../lib/participation";
 
 const MAX_ANOMALIES = 8;
 
@@ -27,16 +27,22 @@ const MAX_ANOMALIES = 8;
  * than as a confident number drawn from a handful of units.
  */
 export default function Participation() {
-  const { data, versionId, setVersionId } = useParticipation();
+  const { setVersionId } = useParticipation();
+  const { apiCampaign, rootUnits } = useFilters();
+  const { versions, version } = useParticipationSetup();
+  const { entries, reports, qualityCases, lineage } = useParticipationStats();
+  const national = useNationalSummary();
+  const statesQuery = useLevelRows(rootUnits[0]?.id);
+  const discrepancies = useRegisterDiscrepancies(apiCampaign?.id);
 
-  const summary = useMemo(() => nationalSummary(data), [data]);
-  const states = useMemo(() => stateRows(data), [data]);
+  const summary = national.summary;
+  const states = statesQuery.rows;
 
-  const version =
-    data.versions.find((v) => v.id === (versionId ?? data.activeVersionId)) ?? null;
-
-  const openAnomalies = data.anomalies.filter((a) => a.status !== "dismissed");
-  const openDiscrepancies = data.discrepancies.filter(
+  const unitByReport = new Map(reports.map((r) => [r.id, r.polling_unit_id]));
+  const openAnomalies = qualityCases
+    .filter((a) => a.status !== "dismissed" && a.status !== "resolved")
+    .sort((a, b) => b.detected_at.localeCompare(a.detected_at));
+  const openDiscrepancies = (discrepancies.data ?? []).filter(
     (d) => d.status === "open" || d.status === "reviewing",
   );
 
@@ -48,12 +54,12 @@ export default function Participation() {
         <Select
           aria-label="Register version"
           className="w-64 text-xs"
-          value={versionId ?? data.activeVersionId ?? ""}
+          value={version?.id ?? ""}
           onChange={(e) => setVersionId(e.target.value || null)}
         >
-          {data.versions.map((v) => (
+          {versions.map((v) => (
             <option key={v.id} value={v.id}>
-              {v.label}
+              {v.name}
             </option>
           ))}
         </Select>
@@ -63,72 +69,79 @@ export default function Participation() {
         <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
           Register version
         </span>
-        <span className="text-xs font-semibold">{version?.label ?? "—"}</span>
+        <span className="text-xs font-semibold">{version?.name ?? "—"}</span>
         <StatusPill
-          value={version?.verification_status}
-          tone={version?.verification_status === "verified" ? "primary" : "warning"}
+          value={version?.status}
+          tone={version?.status === "published" ? "primary" : "warning"}
         />
-        {version?.is_locked && <StatusPill value="locked" tone="muted" />}
+        {/* A published register is immutable — the API's equivalent of locked. */}
+        {version?.status === "published" && <StatusPill value="locked" tone="muted" />}
         <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">
-          {formatCount(data.rows.length)} polling units · {formatCount(data.reportCount)} reports
+          {formatCount(entries.length)} polling units · {formatCount(reports.length)} reports
         </span>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <ParticipationKpi
-          label="Registered voters"
-          value={formatCount(summary.registered)}
-          provenance="inec_official"
-          hint={version?.label}
-        />
-        <ParticipationKpi
-          label="Voter coverage (primary)"
-          value={formatPercent(summary.metrics.voterCoverage)}
-          provenance="sentinel_observed"
-          hint={`${formatCount(summary.coveredPus)}/${formatCount(summary.totalPus)} PUs reporting`}
-        />
-        <ParticipationKpi
-          label="Accreditation rate"
-          value={formatPercent(summary.metrics.accreditationRate)}
-          provenance="sentinel_observed"
-          hint={`${formatCount(summary.accredited)} accredited`}
-        />
-        <ParticipationKpi
-          label="Participation rate"
-          value={formatPercent(summary.metrics.participationRate)}
-          provenance="sentinel_observed"
-          hint={`${formatCount(summary.participating)} participating`}
-        />
-        <ParticipationKpi
-          label="Valid votes"
-          value={formatCount(summary.valid)}
-          provenance="sentinel_observed"
-          hint={formatPercent(summary.metrics.validVoteRate)}
-        />
-        <ParticipationKpi
-          label="Invalid votes"
-          value={formatCount(summary.invalid)}
-          provenance="sentinel_observed"
-          hint={`${formatPercent(summary.metrics.invalidVoteRate)} of participating`}
-          tone="warning"
-        />
-        <ParticipationKpi
-          label="Open anomalies"
-          value={formatCount(openAnomalies.length)}
-          hint="Flagged for analyst review"
-          tone={openAnomalies.length ? "danger" : "default"}
-        />
-        <ParticipationKpi
-          label="Register discrepancies"
-          value={formatCount(openDiscrepancies.length)}
-          hint="Field figure vs INEC baseline"
-          tone={openDiscrepancies.length ? "warning" : "default"}
-        />
-      </div>
+      {national.error && !summary ? (
+        <Panel>
+          <ErrorState error={national.error} onRetry={() => national.refetch()} />
+        </Panel>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <ParticipationKpi
+            label="Registered voters"
+            value={formatCount(summary?.registered)}
+            provenance="inec_official"
+            hint={version?.name}
+          />
+          <ParticipationKpi
+            label="Voter coverage (primary)"
+            value={formatPercent(summary?.metrics.voterCoverage)}
+            provenance="sentinel_observed"
+            hint={`${formatCount(summary?.coveredPus)}/${formatCount(summary?.totalPus)} PUs reporting`}
+          />
+          <ParticipationKpi
+            label="Accreditation rate"
+            value={formatPercent(summary?.metrics.accreditationRate)}
+            provenance="sentinel_observed"
+            hint={`${formatCount(summary?.accredited)} accredited`}
+          />
+          <ParticipationKpi
+            label="Participation rate"
+            value={formatPercent(summary?.metrics.participationRate)}
+            provenance="sentinel_observed"
+            hint={`${formatCount(summary?.participating)} participating`}
+          />
+          <ParticipationKpi
+            label="Valid votes"
+            value={formatCount(summary?.valid)}
+            provenance="sentinel_observed"
+            hint={formatPercent(summary?.metrics.validVoteRate)}
+          />
+          <ParticipationKpi
+            label="Invalid votes"
+            value={formatCount(summary?.invalid)}
+            provenance="sentinel_observed"
+            hint={`${formatPercent(summary?.metrics.invalidVoteRate)} of participating`}
+            tone="warning"
+          />
+          <ParticipationKpi
+            label="Open anomalies"
+            value={formatCount(openAnomalies.length)}
+            hint="Flagged for analyst review"
+            tone={openAnomalies.length ? "danger" : "default"}
+          />
+          <ParticipationKpi
+            label="Register discrepancies"
+            value={formatCount(openDiscrepancies.length)}
+            hint="Field figure vs INEC baseline"
+            tone={openDiscrepancies.length ? "warning" : "default"}
+          />
+        </div>
+      )}
 
       <Panel
         title="National confidence & historical comparison"
-        action={<ConfidencePill value={summary.confidence} />}
+        action={summary && <ConfidencePill value={summary.confidence} />}
       >
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
@@ -136,7 +149,7 @@ export default function Participation() {
               Observed turnout
             </p>
             <p className="font-mono text-xl font-semibold tabular-nums">
-              {formatPercent(summary.metrics.participationRate)}
+              {formatPercent(summary?.metrics.participationRate)}
             </p>
           </div>
           <div>
@@ -144,7 +157,7 @@ export default function Participation() {
               Historical benchmark
             </p>
             <p className="font-mono text-xl font-semibold tabular-nums">
-              {formatPercent(summary.historicalTurnout)}
+              {formatPercent(summary?.historicalTurnout)}
             </p>
           </div>
           <div>
@@ -152,19 +165,23 @@ export default function Participation() {
               Difference
             </p>
             <p className="font-mono text-xl font-semibold">
-              <DeltaBig value={summary.historicalDelta} />
+              <DeltaBig value={summary?.historicalDelta ?? null} />
             </p>
           </div>
         </div>
         <p className="mt-3 text-[11px] text-muted-foreground">
-          Verified reports: {formatCount(summary.verifiedReports)} · Unverified:{" "}
-          {formatCount(summary.unverifiedReports)} · Last report{" "}
-          {formatRelative(summary.lastReportAt)}
+          Verified reports: {formatCount(summary?.verifiedReports)} · Unverified:{" "}
+          {formatCount(summary?.unverifiedReports)} · Last report{" "}
+          {formatRelative(summary?.lastReportAt)}
         </p>
       </Panel>
 
       <Panel title="State participation table">
-        {states.length ? (
+        {statesQuery.isLoading || national.isLoading ? (
+          <LoadingRows rows={3} padded={false} />
+        ) : statesQuery.error ? (
+          <ErrorState error={statesQuery.error} onRetry={() => statesQuery.refetch()} />
+        ) : states.length ? (
           <MetricsTable rows={states} levelLabel="State" />
         ) : (
           <ParticipationEmpty message="No polling units loaded yet." />
@@ -183,10 +200,12 @@ export default function Participation() {
                   value={a.severity}
                   tone={a.severity === "critical" || a.severity === "high" ? "destructive" : "warning"}
                 />
-                <span className="font-semibold">
-                  {ANOMALY_LABELS[a.anomaly_type] ?? titleCase(a.anomaly_type)}
+                <span className="font-semibold">{titleCase(a.rule_code.toLowerCase())}</span>
+                <span className="text-muted-foreground">
+                  {[lineage(unitByReport.get(a.report_id))?.unit.official_code, titleCase(a.status)]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </span>
-                <span className="text-muted-foreground">{a.detail}</span>
                 <span className="ml-auto text-[11px] text-muted-foreground">
                   {formatRelative(a.detected_at)}
                 </span>

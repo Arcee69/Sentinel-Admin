@@ -35,6 +35,13 @@ export const API = {
     pollingReports: (c: string) => `/campaigns/${c}/polling-reports`,
     intelligenceSummary: (c: string) => `/campaigns/${c}/intelligence/summary`,
     intelligenceObservations: (c: string) => `/campaigns/${c}/intelligence/observations`,
+    participationSummary: (c: string) => `/campaigns/${c}/participation/summary`,
+    participationGeography: (c: string) => `/campaigns/${c}/participation/geography`,
+    participationHistory: (c: string) => `/campaigns/${c}/participation/history`,
+    ballotsSummary: (c: string) => `/campaigns/${c}/ballots/summary`,
+    reportSelections: (c: string) => `/campaigns/${c}/report-selections`,
+    qualityCases: (c: string) => `/campaigns/${c}/quality-cases`,
+    registerDiscrepancies: (c: string) => `/campaigns/${c}/register-discrepancies`,
   },
 
   incident: {
@@ -73,5 +80,9 @@ export const API = {
     electoralDistricts: "/electoral-districts",
     referenceSources: "/reference-sources",
     referenceSourceDownload: (source: string) => `/reference-sources/${source}/download`,
+    contestRounds: "/contest-rounds",
+    historicalBenchmark: (contest: string) => `/contests/${contest}/historical-benchmark`,
+    registerVersions: "/register-versions",
+    registerEntries: (version: string) => `/register-versions/${version}/entries`,
   },
 } as const;
