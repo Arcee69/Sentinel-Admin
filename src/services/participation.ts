@@ -1,5 +1,5 @@
 import { API } from "./api";
-import { getAllPages, getList, getMethod } from "./requests";
+import { getAllPages, getList, getMethod, postMethod } from "./requests";
 import type { ParticipationMetric, ParticipationMode, ParticipationSummary } from "./dashboard";
 
 export type { ParticipationMetric, ParticipationMode, ParticipationSummary };
@@ -117,6 +117,11 @@ export interface RegisterDiscrepancyRecord {
   revision: number;
 }
 
+export type ReviewAction = "verify" | "reject" | "revoke";
+/** The states a discrepancy can move to (the API has no "reopen"). */
+export type DiscrepancyNextStatus = "reviewing" | "resolved_register_updated" | "dismissed";
+export type QualityCaseNextStatus = "reviewing" | "confirmed" | "dismissed";
+
 /** Register entries come in pages of 100; a national register is far larger. */
 const ENTRY_PAGE_CAP = 20;
 
@@ -154,4 +159,29 @@ export const participationApi = {
   qualityCases: (campaignId: string) => getAllPages<QualityCase>(API.campaign.qualityCases(campaignId)),
   discrepancies: (campaignId: string) =>
     getAllPages<RegisterDiscrepancyRecord>(API.campaign.registerDiscrepancies(campaignId)),
+
+  /** `revoke` undoes an earlier verify/reject. Authors can't review their own reports. */
+  reviewReport: (
+    reportId: string,
+    payload: { action: ReviewAction; reason: string; expected_revision: number },
+  ) => postMethod<unknown>(API.pollingReport.reviews(reportId), payload),
+  transitionDiscrepancy: (
+    discrepancyId: string,
+    payload: {
+      next_status: DiscrepancyNextStatus;
+      reason: string;
+      expected_revision: number;
+      resolution_source_id?: string | null;
+      replacement_register_version_id?: string | null;
+    },
+  ) => postMethod<RegisterDiscrepancyRecord>(API.registerDiscrepancy.transitions(discrepancyId), payload),
+  transitionQualityCase: (
+    caseId: string,
+    payload: { next_status: QualityCaseNextStatus; reason: string; expected_revision: number },
+  ) => postMethod<QualityCase>(API.qualityCase.transitions(caseId), payload),
+  publishRegister: (versionId: string) => postMethod<RegisterVersion>(API.catalog.registerPublish(versionId)),
+  districtPollingUnits: (districtId: string) =>
+    getList<{ id: string; kind?: string; parent_id?: string | null }>(
+      API.catalog.districtPollingUnits(districtId),
+    ),
 };

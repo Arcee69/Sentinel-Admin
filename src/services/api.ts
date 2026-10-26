@@ -44,6 +44,18 @@ export const API = {
     registerDiscrepancies: (c: string) => `/campaigns/${c}/register-discrepancies`,
   },
 
+  pollingReport: {
+    reviews: (r: string) => `/polling-reports/${r}/reviews`,
+  },
+
+  registerDiscrepancy: {
+    transitions: (d: string) => `/register-discrepancies/${d}/transitions`,
+  },
+
+  qualityCase: {
+    transitions: (q: string) => `/quality-cases/${q}/transitions`,
+  },
+
   incident: {
     show: (i: string) => `/incidents/${i}`,
     events: (i: string) => `/incidents/${i}/events`,
@@ -84,5 +96,7 @@ export const API = {
     historicalBenchmark: (contest: string) => `/contests/${contest}/historical-benchmark`,
     registerVersions: "/register-versions",
     registerEntries: (version: string) => `/register-versions/${version}/entries`,
+    registerPublish: (version: string) => `/register-versions/${version}/publish`,
+    districtPollingUnits: (district: string) => `/electoral-districts/${district}/polling-units`,
   },
 } as const;

@@ -1,6 +1,10 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { participationApi, type ParticipationMode } from "../../services/participation";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  participationApi,
+  type ParticipationMode,
+  type ParticipationReport,
+} from "../../services/participation";
 import { toApiError } from "../../services/errors";
 import { useParticipation } from "../../context/ParticipationContext";
 import { useFilters } from "../../context/FilterContext";
@@ -252,4 +256,197 @@ export function useLevelRows(
   );
 
   return { rows, isLoading: query.isLoading, error: query.error, refetch: query.refetch };
+}
+
+/** One polling unit: its register baseline, place in the hierarchy and reports. */
+export interface PollingUnitRow {
+  id: string;
+  entryId: string;
+  code: string;
+  name: string;
+  state: string;
+  lga: string;
+  ward: string;
+  /** INEC baseline from the register entry. */
+  registered: number;
+  reports: ParticipationReport[];
+  /** The report the row shows: verified first, then the newest. */
+  report: ParticipationReport | null;
+  anomalies: number;
+}
+
+const REVIEW_RANK: Record<string, number> = {
+  verified: 0,
+  pending_review: 1,
+  revoked: 2,
+  rejected: 3,
+};
+
+function bestReport(reports: ParticipationReport[]): ParticipationReport | null {
+  if (!reports.length) return null;
+  return [...reports].sort(
+    (a, b) =>
+      (REVIEW_RANK[a.review_state] ?? 3) - (REVIEW_RANK[b.review_state] ?? 3) ||
+      b.received_at.localeCompare(a.received_at),
+  )[0];
+}
+
+/** Every polling unit on the active register, joined to its reports and anomalies. */
+export function usePollingUnitRows() {
+  const { entries, reports, qualityCases, lineage, isLoading } = useParticipationStats();
+
+  const rows = useMemo<PollingUnitRow[]>(() => {
+    const byUnit = new Map<string, ParticipationReport[]>();
+    for (const r of reports) {
+      if (!r.polling_unit_id) continue;
+      const list = byUnit.get(r.polling_unit_id) ?? [];
+      list.push(r);
+      byUnit.set(r.polling_unit_id, list);
+    }
+    const unitByReport = new Map(reports.map((r) => [r.id, r.polling_unit_id]));
+    const anomalies = new Map<string, number>();
+    for (const q of qualityCases) {
+      if (q.status === "dismissed" || q.status === "resolved") continue;
+      const unit = unitByReport.get(q.report_id);
+      if (unit) anomalies.set(unit, (anomalies.get(unit) ?? 0) + 1);
+    }
+
+    return entries
+      .map((e) => {
+        const place = lineage(e.polling_unit_id);
+        const unitReports = byUnit.get(e.polling_unit_id) ?? [];
+        return {
+          id: e.polling_unit_id,
+          entryId: e.id,
+          code: place?.unit.official_code ?? "—",
+          name: place?.unit.name ?? "Unplaced polling unit",
+          state: place?.state?.name ?? "",
+          lga: place?.lga?.name ?? "",
+          ward: place?.ward?.name ?? "",
+          registered: e.registered_count,
+          reports: unitReports,
+          report: bestReport(unitReports),
+          anomalies: anomalies.get(e.polling_unit_id) ?? 0,
+        };
+      })
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [entries, reports, qualityCases, lineage]);
+
+  return { rows, isLoading };
+}
+
+/** Reviews and transitions move every participation figure, so refresh them all. */
+function useInvalidateParticipation() {
+  const queryClient = useQueryClient();
+  const { apiCampaign } = useFilters();
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: ["campaign", apiCampaign?.id] });
+    void queryClient.invalidateQueries({ queryKey: ["catalog", "register-versions"] });
+  };
+}
+
+export function useReviewReport() {
+  const invalidate = useInvalidateParticipation();
+  return useMutation({
+    mutationFn: ({ reportId, ...payload }: { reportId: string } & Parameters<typeof participationApi.reviewReport>[1]) =>
+      participationApi.reviewReport(reportId, payload),
+    onSettled: invalidate,
+  });
+}
+
+export function useTransitionDiscrepancy() {
+  const invalidate = useInvalidateParticipation();
+  return useMutation({
+    mutationFn: ({
+      discrepancyId,
+      ...payload
+    }: { discrepancyId: string } & Parameters<typeof participationApi.transitionDiscrepancy>[1]) =>
+      participationApi.transitionDiscrepancy(discrepancyId, payload),
+    onSettled: invalidate,
+  });
+}
+
+export function useTransitionQualityCase() {
+  const invalidate = useInvalidateParticipation();
+  return useMutation({
+    mutationFn: ({
+      caseId,
+      ...payload
+    }: { caseId: string } & Parameters<typeof participationApi.transitionQualityCase>[1]) =>
+      participationApi.transitionQualityCase(caseId, payload),
+    onSettled: invalidate,
+  });
+}
+
+export function usePublishRegister() {
+  const invalidate = useInvalidateParticipation();
+  return useMutation({
+    mutationFn: (versionId: string) => participationApi.publishRegister(versionId),
+    onSettled: invalidate,
+  });
+}
+
+/**
+ * Historical benchmarks for the occasion's contests, each placed at the
+ * geography it covers: the presidential contest nationally, and every other
+ * contest at the state its electoral district sits in.
+ */
+/** Stable `combine`s so the combined results only change when the data does. */
+const firstUnitIds = (results: { data?: { id: string }[] }[]) =>
+  results.map((r) => r.data?.[0]?.id ?? null);
+const benchmarkResults = (
+  results: { data?: Parameters<typeof benchmarkTurnout>[0]; isLoading: boolean }[],
+) => ({
+  turnouts: results.map((r) => benchmarkTurnout(r.data)),
+  isLoading: results.some((r) => r.isLoading),
+});
+
+export function useContestBenchmarks() {
+  const { occasion } = useParticipationSetup();
+  const contests = useContests(occasion ? [occasion.election_cycle_id] : []);
+  const list = useMemo(() => contests.data ?? [], [contests.data]);
+
+  const sampleUnits = useQueries({
+    queries: list.map((c) => ({
+      queryKey: ["catalog", "district-units", c.electoral_district_id],
+      queryFn: async () => (await participationApi.districtPollingUnits(c.electoral_district_id)).data,
+      enabled: c.office_type !== "presidential",
+      staleTime: 10 * 60_000,
+    })),
+    combine: firstUnitIds,
+  });
+  const benchmarks = useQueries({
+    queries: list.map((c) => ({
+      queryKey: ["catalog", "historical-benchmark", c.id],
+      queryFn: async () => {
+        try {
+          return (await participationApi.benchmark(c.id)).data;
+        } catch (err) {
+          // No sourced benchmark yet is a normal state, not an error.
+          if (toApiError(err).status === 404) return null;
+          throw err;
+        }
+      },
+      staleTime: 10 * 60_000,
+    })),
+    combine: benchmarkResults,
+  });
+
+  // One polling unit per district is enough to find its state.
+  const lineage = useUnitLineage(sampleUnits);
+
+  return useMemo(() => {
+    let national: number | null = null;
+    const byState = new Map<string, number>();
+    list.forEach((c, i) => {
+      const turnout = benchmarks.turnouts[i];
+      if (turnout == null) return;
+      if (c.office_type === "presidential") national = turnout;
+      else {
+        const state = lineage(sampleUnits[i])?.state;
+        if (state) byState.set(state.id, turnout);
+      }
+    });
+    return { national, byState, isLoading: contests.isLoading || benchmarks.isLoading };
+  }, [list, benchmarks, lineage, sampleUnits, contests.isLoading]);
 }
