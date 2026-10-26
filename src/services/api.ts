@@ -33,6 +33,8 @@ export const API = {
     commandPollingUnits: (c: string) => `/campaigns/${c}/command/polling-units`,
     incidents: (c: string) => `/campaigns/${c}/incidents`,
     pollingReports: (c: string) => `/campaigns/${c}/polling-reports`,
+    intelligenceSummary: (c: string) => `/campaigns/${c}/intelligence/summary`,
+    intelligenceObservations: (c: string) => `/campaigns/${c}/intelligence/observations`,
   },
 
   incident: {

@@ -33,6 +33,8 @@ import { describeAlert, sortAlerts } from "../lib/alerts";
 import { humanize, isoDay, parseApiDate, relativeTime } from "../lib/format";
 import { STATE_ACTIVITY, type Trend } from "../lib/data";
 import { toStateActivity } from "../lib/stateShapes";
+import { sentimentMix } from "../lib/intelligence";
+import { useIntelligenceSummary } from "../hooks/api/useIntelligence";
 import type { CampaignAnalytics } from "../services/dashboard";
 import { cn } from "../lib/cn";
 
@@ -42,6 +44,8 @@ const KPI_ICONS = [Waves, Users, Activity, FileText];
 const ANALYTICS_DAYS = 30;
 /** An agent with a heartbeat this recent counts as online. */
 const ONLINE_WINDOW_MS = 15 * 60_000;
+/** The sentiment tile's window, matching its "14d window" caption. */
+const SENTIMENT_DAYS = 14;
 
 const STREAM_DOT = {
   primary: "bg-primary",
@@ -109,13 +113,33 @@ export default function Dashboard() {
     from.setDate(to.getDate() - (ANALYTICS_DAYS - 1));
     const yesterday = new Date();
     yesterday.setDate(to.getDate() - 1);
-    return { from: isoDay(from), to: isoDay(to), yesterday: isoDay(yesterday) };
+    const sentimentFrom = new Date();
+    sentimentFrom.setDate(to.getDate() - (SENTIMENT_DAYS - 1));
+    const prevTo = new Date(sentimentFrom);
+    prevTo.setDate(sentimentFrom.getDate() - 1);
+    const prevFrom = new Date(prevTo);
+    prevFrom.setDate(prevTo.getDate() - (SENTIMENT_DAYS - 1));
+    return {
+      from: isoDay(from),
+      to: isoDay(to),
+      yesterday: isoDay(yesterday),
+      sentiment: { from: isoDay(sentimentFrom), to: isoDay(to) },
+      sentimentPrevious: { from: isoDay(prevFrom), to: isoDay(prevTo) },
+    };
   }, []);
 
   const overview = useDashboardOverview(campaignId);
   const analytics = useCampaignAnalytics(campaignId, { from: range.from, to: range.to });
   const agents = useAgentActivity(campaignId);
   const alertsQuery = useCampaignAlerts(campaignId);
+  const sentimentNow = useIntelligenceSummary(campaignId, {
+    ...range.sentiment,
+    unitId: scopeUnit?.id,
+  });
+  const sentimentBefore = useIntelligenceSummary(campaignId, {
+    ...range.sentimentPrevious,
+    unitId: scopeUnit?.id,
+  });
   const activity = useActivityFeed(campaignId);
 
   const criticalAlerts = sortAlerts(alertsQuery.data?.items ?? []);
@@ -155,7 +179,10 @@ export default function Dashboard() {
     recent.length === activityStream.length &&
     !!activity.data?.pages[0]?.next_cursor;
 
-  const sentimentDays = analytics.data?.daily_sentiment_observations.length ?? 0;
+  const sentiment = sentimentMix(sentimentNow.data);
+  const previousSentiment = sentimentMix(sentimentBefore.data);
+  const sentimentTrend =
+    sentiment && previousSentiment ? change(sentiment.net, previousSentiment.net) : null;
 
   const kpis: {
     label: string;
@@ -178,13 +205,14 @@ export default function Dashboard() {
       tone: "accent",
     },
     {
-      // No score until reviewed sentiment observations are recorded; the
-      // calculation is wired with the Intelligence screen.
+      // Same net score as the Intelligence dial: 50 is balanced.
       label: "Sentiment Score",
-      value: "—",
-      caption: analytics.data
-        ? sentimentDays
-          ? `${sentimentDays} days with observations · ${ANALYTICS_DAYS}d window`
+      value: sentiment ? String(sentiment.net) : "—",
+      delta: sentimentTrend?.delta,
+      trend: sentimentTrend?.trend,
+      caption: sentimentNow.data
+        ? sentiment
+          ? `Net ${sentiment.net >= 50 ? "positive" : "negative"} · ${SENTIMENT_DAYS}d window`
           : "No recorded observations yet"
         : undefined,
       tone: "info",
