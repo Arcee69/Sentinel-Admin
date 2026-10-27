@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useFormik } from "formik";
 import * as Yup from "yup";
 import { toast } from "sonner";
-import { useQueries } from "@tanstack/react-query";
 import { Loader2, Plus, UserPlus, Users } from "lucide-react";
 import { Panel } from "../ui/Panel";
 import { Button } from "../ui/Button";
@@ -20,7 +19,6 @@ import {
   useSetGrant,
   useUpdateMembership,
 } from "../../hooks/api/useSettings";
-import { organizationApi } from "../../services/organization";
 import { errorMessage, toApiError } from "../../services/errors";
 import { cn } from "../../lib/cn";
 
@@ -61,33 +59,23 @@ export function UsersPanel() {
 
   const memberships = useMemo(() => membershipsQuery.data ?? [], [membershipsQuery.data]);
 
-  // Memberships carry no names or emails. Agents' identities come from their
-  // campaign profiles; the signed-in user's from the session.
-  const agentProfiles = useQueries({
-    queries: memberships
-      .filter((m) => m.role === "agent")
-      .map((m) => ({
-        queryKey: ["campaign", apiCampaign?.id, "agent", m.id],
-        queryFn: async () => (await organizationApi.agent(apiCampaign!.id, m.id)).data,
-        enabled: !!apiCampaign,
-        retry: false,
-      })),
-  });
+  // Memberships carry each person's identity; the session fills in for the
+  // signed-in user if their row arrives without one.
   const people = useMemo(() => {
-    const map = new Map<string, { name: string; email: string; lastLoginAt: string | null }>();
-    for (const q of agentProfiles) {
-      const d = q.data;
-      if (d) map.set(d.membership_id, { name: d.user.name, email: d.user.email, lastLoginAt: d.user.last_login_at });
+    const map = new Map<string, { name: string | null; email: string | null; lastLoginAt: string | null }>();
+    for (const m of memberships) {
+      map.set(m.id, { name: m.name, email: m.email, lastLoginAt: m.last_login_at });
     }
     if (apiUser && activeOrganization) {
+      const own = map.get(activeOrganization.membership.id);
       map.set(activeOrganization.membership.id, {
-        name: apiUser.name,
-        email: apiUser.email,
-        lastLoginAt: apiUser.last_login_at,
+        name: own?.name ?? apiUser.name,
+        email: own?.email ?? apiUser.email,
+        lastLoginAt: own?.lastLoginAt ?? apiUser.last_login_at,
       });
     }
     return map;
-  }, [agentProfiles, apiUser, activeOrganization]);
+  }, [memberships, apiUser, activeOrganization]);
 
   /** Active grant IDs and the state they point at, per membership. */
   const grantsByMember = useMemo(() => {

@@ -20,6 +20,22 @@ export interface ParticipationExport {
   completed_at: string | null;
 }
 
+/** The filename from a Content-Disposition header, or null when it carries none. */
+export function dispositionFilename(header: unknown): string | null {
+  if (typeof header !== "string") return null;
+  const encoded = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(header);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1].trim());
+    } catch {
+      /* malformed encoding — fall back to the plain filename */
+    }
+  }
+  const plain = /filename\s*=\s*("([^"]*)"|[^;]+)/.exec(header);
+  const name = (plain?.[2] ?? plain?.[1])?.trim();
+  return name || null;
+}
+
 /** Saves a blob through a temporary link, the way a browser download works. */
 export function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -31,10 +47,7 @@ export function saveBlob(blob: Blob, filename: string) {
 }
 
 export const reportsApi = {
-  /**
-   * The operations report as a file. The API's CORS policy doesn't expose
-   * Content-Disposition, so the caller names the file.
-   */
+  /** The operations report as a file, with the filename the server gave it. */
   operationsFile: async (
     campaignId: string,
     query: { from: string; to: string; format: OperationsFormat },
@@ -44,7 +57,7 @@ export const reportsApi = {
       responseType: "blob",
       headers: { Accept: query.format === "pdf" ? "application/pdf" : "text/csv" },
     });
-    return res.data;
+    return { blob: res.data, filename: dispositionFilename(res.headers["content-disposition"]) };
   },
 
   exports: (campaignId: string) => getAllPages<ParticipationExport>(API.campaign.exports(campaignId)),
@@ -61,12 +74,9 @@ export const reportsApi = {
   /** A signed URL valid for about five minutes; request a new one after it expires. */
   downloadLink: (exportId: string) =>
     getMethod<{ url: string; expires_at: string }>(API.export.downloadLink(exportId)),
-  /**
-   * Fetches the CSV behind a signed URL. The API currently also requires the
-   * bearer token on it (500 without), which the shared client attaches.
-   */
+  /** Fetches the CSV behind a signed URL, with the filename the server gave it. */
   downloadSigned: async (url: string) => {
     const res = await apiInstance.get<Blob>(url, { responseType: "blob" });
-    return res.data;
+    return { blob: res.data, filename: dispositionFilename(res.headers["content-disposition"]) };
   },
 };

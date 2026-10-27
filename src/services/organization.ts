@@ -10,6 +10,9 @@ export interface Membership {
   user_id: string;
   role: CampaignRole;
   status: string;
+  name: string | null;
+  email: string | null;
+  last_login_at: string | null;
   ended_at: string | null;
   created_at: string;
   updated_at: string;

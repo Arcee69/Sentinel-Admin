@@ -16,8 +16,8 @@ const UNFINISHED = new Set(["queued", "processing", "pending"]);
 export function useOperationsDownload(campaignId: string | undefined) {
   return useMutation({
     mutationFn: async (input: { from: string; to: string; format: OperationsFormat }) => {
-      const blob = await reportsApi.operationsFile(campaignId!, input);
-      saveBlob(blob, `sentinel-operations-${input.from}-${input.to}.${input.format}`);
+      const { blob, filename } = await reportsApi.operationsFile(campaignId!, input);
+      saveBlob(blob, filename ?? `sentinel-operations-${input.from}-${input.to}.${input.format}`);
     },
   });
 }
@@ -62,8 +62,8 @@ export function useParticipationExport(campaignId: string | undefined) {
         job = (await reportsApi.export(job.id)).data;
       }
       const link = (await reportsApi.downloadLink(job.id)).data;
-      const blob = await reportsApi.downloadSigned(link.url);
-      saveBlob(blob, `sentinel-participation-${job.id}.csv`);
+      const { blob, filename } = await reportsApi.downloadSigned(link.url);
+      saveBlob(blob, filename ?? `sentinel-participation-${job.id}.csv`);
       return job;
     },
     onSettled: () =>
