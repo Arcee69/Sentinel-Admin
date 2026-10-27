@@ -82,7 +82,7 @@ const FIELD_FOR: Record<string, string> = {
 };
 
 export function NewTaskModal({ open, onClose, presetAgentId, onCreate }: Props) {
-  const { campaign, apiCampaign, scopeLabel } = useFilters();
+  const { apiCampaign, scopeLabel } = useFilters();
   const { agents: allAgents } = useAssignableAgents(apiCampaign?.id);
   const createTask = useCreateTask(apiCampaign?.id);
   const inScope = useInScope();
@@ -213,10 +213,10 @@ export function NewTaskModal({ open, onClose, presetAgentId, onCreate }: Props) 
             <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
               Task campaign
             </p>
-            <p className="truncate text-[13px] font-semibold text-primary">{campaign.name}</p>
+            <p className="truncate text-[13px] font-semibold text-primary">{apiCampaign?.name}</p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {campaign.cycle} · {campaign.scopeLabel} — this task will only appear under this
-              campaign.
+              {[apiCampaign?.cycle, apiCampaign?.office].filter(Boolean).join(" · ")} — this task
+              will only appear under this campaign.
             </p>
           </div>
         </div>

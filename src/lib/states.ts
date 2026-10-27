@@ -15,8 +15,6 @@ export type Zone =
   | "South South"
   | "South West";
 
-export const NORTHERN_ZONES: Zone[] = ["North Central", "North East", "North West"];
-
 export interface StateActivity {
   /** Two-letter code — joins to the map geometry in nigeriaGeo.ts. */
   code: string;

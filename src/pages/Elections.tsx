@@ -19,7 +19,6 @@ import { StatCard } from "../components/ui/StatCard";
 import { Input, Select } from "../components/ui/Field";
 import { TabPanel, TabsList } from "../components/ui/Tabs";
 import { ErrorState, LoadingRows } from "../components/ui/AsyncState";
-import { type Tier } from "../lib/elections";
 import {
   useCandidates,
   useContests,
@@ -74,6 +73,8 @@ function partyColor(id: string) {
   for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) | 0;
   return PARTY_PALETTE[Math.abs(h) % PARTY_PALETTE.length];
 }
+
+type Tier = "federal" | "state" | "local";
 
 function tierOf(office: OfficeType): Tier {
   const o = office.toLowerCase();

@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { ALL_STATES, statesForCampaign, type Campaign } from "../lib/campaigns";
 import { useAuth, type WorkspaceCampaign } from "./AuthContext";
 import { useCampaignStates } from "../hooks/api/useGeography";
 import type { GeoUnit } from "../services/geography";
@@ -24,41 +23,9 @@ interface FilterValue {
   scopeLabel: string;
   setScopeUnit: (id: string | null) => void;
   reset: () => void;
-
-  /*
-   * Legacy fields for screens still on mock data. Mock records are keyed by
-   * Nigerian state names, which can't be matched to API unit IDs, so those
-   * screens always see the campaign nationwide until they are integrated.
-   */
-  campaign: Campaign;
-  campaignId: string;
-  scope: string;
-  availableStates: string[];
-  activeStates: Set<string>;
-  isNationwide: boolean;
 }
 
 const FilterContext = createContext<FilterValue | null>(null);
-
-const NO_CAMPAIGN: Campaign = {
-  id: "",
-  name: "No campaign",
-  party: "",
-  cycle: "",
-  scopeLabel: "",
-  states: null,
-};
-
-function toLegacyCampaign(c: WorkspaceCampaign): Campaign {
-  return {
-    id: c.id,
-    name: c.name,
-    party: c.party ?? "",
-    cycle: c.cycle ?? "",
-    scopeLabel: c.office ?? "Campaign scope",
-    states: null,
-  };
-}
 
 function readStoredScope(): string | null {
   try {
@@ -85,11 +52,9 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<FilterValue>(() => {
-    const campaign = activeCampaign ? toLegacyCampaign(activeCampaign) : NO_CAMPAIGN;
     const stateUnits = statesQuery.data?.states ?? [];
     // A scope left over from another campaign falls back to the whole campaign.
     const scopeUnit = stateUnits.find((s) => s.id === storedScope) ?? null;
-    const legacyStates = statesForCampaign(campaign);
 
     return {
       apiCampaign: activeCampaign,
@@ -106,15 +71,16 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       scopeLabel: scopeUnit?.name ?? "All States",
       setScopeUnit: persistScope,
       reset: () => persistScope(null),
-
-      campaign,
-      campaignId: campaign.id,
-      scope: ALL_STATES,
-      availableStates: legacyStates,
-      activeStates: new Set(legacyStates),
-      isNationwide: true,
     };
-  }, [activeCampaign, campaigns, statesQuery.data, statesQuery.isLoading, storedScope, persistScope, selectCampaign]);
+  }, [
+    activeCampaign,
+    campaigns,
+    statesQuery.data,
+    statesQuery.isLoading,
+    storedScope,
+    persistScope,
+    selectCampaign,
+  ]);
 
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;
 }
