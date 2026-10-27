@@ -42,6 +42,13 @@ export const API = {
     reportSelections: (c: string) => `/campaigns/${c}/report-selections`,
     qualityCases: (c: string) => `/campaigns/${c}/quality-cases`,
     registerDiscrepancies: (c: string) => `/campaigns/${c}/register-discrepancies`,
+    operationsReport: (c: string) => `/campaigns/${c}/reports/operations`,
+    exports: (c: string) => `/campaigns/${c}/exports`,
+  },
+
+  export: {
+    show: (e: string) => `/exports/${e}`,
+    downloadLink: (e: string) => `/exports/${e}/download-link`,
   },
 
   pollingReport: {
