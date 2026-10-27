@@ -27,6 +27,7 @@ export const API = {
     notifications: (c: string) => `/campaigns/${c}/notifications`,
     agentActivity: (c: string) => `/campaigns/${c}/agents/activity`,
     agent: (c: string, membership: string) => `/campaigns/${c}/agents/${membership}`,
+    geographicGrants: (c: string) => `/campaigns/${c}/geographic-grants`,
     tasks: (c: string) => `/campaigns/${c}/tasks`,
     fieldReports: (c: string) => `/campaigns/${c}/field-reports`,
     assignments: (c: string) => `/campaigns/${c}/assignments`,
@@ -85,6 +86,12 @@ export const API = {
     memberships: (o: string) => `/organizations/${o}/memberships`,
     agents: (o: string) => `/organizations/${o}/agents`,
     staffInvitations: (o: string) => `/organizations/${o}/staff-invitations`,
+    campaigns: (o: string) => `/organizations/${o}/campaigns`,
+    membership: (o: string, m: string) => `/organizations/${o}/memberships/${m}`,
+  },
+
+  geographicGrant: {
+    revoke: (g: string) => `/geographic-grants/${g}/revoke`,
   },
 
   assignment: {

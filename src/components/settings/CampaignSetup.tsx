@@ -8,22 +8,26 @@ import { Badge, type BadgeTone } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import { Input, Select } from "../ui/Field";
+import { LoadingRows } from "../ui/AsyncState";
 import { FormRow } from "./FormRow";
-import { SETUP_STATUSES, STATE_OPTIONS, type CampaignRecord, type SetupStatus } from "./model";
-import { CAMPAIGNS, type Campaign } from "../../lib/campaigns";
+import { SETUP_STATUSES } from "./model";
 import { useFilters } from "../../context/FilterContext";
+import { useAuth } from "../../context/AuthContext";
+import { useSaveCampaign } from "../../hooks/api/useSettings";
+import { useUnitNames } from "../../hooks/useUnitNames";
+import { errorMessage, toApiError } from "../../services/errors";
+import type { Campaign } from "../../services/settings";
 import { cn } from "../../lib/cn";
 
-const STATUS_TONES: Record<SetupStatus, BadgeTone> = {
+const STATUS_TONES: Record<string, BadgeTone> = {
   draft: "muted",
   active: "success",
   paused: "warning",
   archived: "muted",
 };
 
-/** Scope picker values besides a state name. */
+/** Scope picker value for "the whole country". */
 const NATIONAL = "";
-const KEEP_SCOPE = "__keep__";
 
 interface FormValues {
   name: string;
@@ -32,7 +36,7 @@ interface FormValues {
   office: string;
   cycle: string;
   scope: string;
-  status: SetupStatus;
+  status: string;
   startDate: string;
   endDate: string;
 }
@@ -63,68 +67,114 @@ const schema = Yup.object({
   ),
 });
 
-/** A multi-state campaign (e.g. Northern zones) can't be expressed by the single-state picker. */
-function scopeOf(c: CampaignRecord): string {
-  if (!c.states) return NATIONAL;
-  return c.states.length === 1 ? c.states[0] : KEEP_SCOPE;
+/** API field → form field, for placing 422 messages. */
+const FIELD_FOR: Record<string, keyof FormValues> = {
+  name: "name",
+  slug: "name",
+  party: "party",
+  candidate: "candidate",
+  office: "office",
+  cycle: "cycle",
+  status: "status",
+  starts_on: "startDate",
+  ends_on: "endDate",
+  scope_unit_ids: "scope",
+};
+
+/** "Lagos Gubernatorial Drive" → "lagos-gubernatorial-drive-x4k2"; the suffix avoids slug clashes. */
+function slugFor(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return `${base || "campaign"}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-function toForm(c: CampaignRecord): FormValues {
+function toForm(c: Campaign): FormValues {
   return {
     name: c.name,
-    party: c.party,
-    candidate: c.candidate,
-    office: c.office,
-    cycle: c.cycle,
-    scope: scopeOf(c),
+    party: c.party ?? "",
+    candidate: c.candidate ?? "",
+    office: c.office ?? "",
+    cycle: c.cycle ?? "",
+    scope: NATIONAL,
     status: c.status,
-    startDate: c.startDate,
-    endDate: c.endDate,
+    startDate: c.starts_on?.slice(0, 10) ?? "",
+    endDate: c.ends_on?.slice(0, 10) ?? "",
   };
 }
 
-function applyScope(scope: string, prev?: CampaignRecord): Pick<Campaign, "states" | "scopeLabel"> {
-  if (scope === KEEP_SCOPE && prev) return { states: prev.states, scopeLabel: prev.scopeLabel };
-  if (scope === NATIONAL) return { states: null, scopeLabel: "36 states + FCT" };
-  return { states: [scope], scopeLabel: `${scope} only` };
-}
-
 interface Props {
-  campaigns: CampaignRecord[];
-  onSave: (campaign: CampaignRecord, isNew: boolean) => void;
+  campaigns: Campaign[];
+  isLoading?: boolean;
   isAdmin: boolean;
   className?: string;
 }
 
-export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) {
-  const { campaignId, setCampaign } = useFilters();
+export function CampaignSetup({ campaigns, isLoading, isAdmin, className }: Props) {
+  const { apiCampaign, campaigns: workspace, setCampaign, stateUnits, rootUnits } = useFilters();
+  const { activeOrganization } = useAuth();
+  const save = useSaveCampaign(activeOrganization?.organization.id);
+  const unitName = useUnitNames();
   // `null` = closed, "new" = create, otherwise the record being edited.
-  const [editing, setEditing] = useState<CampaignRecord | "new" | null>(null);
+  const [editing, setEditing] = useState<Campaign | "new" | null>(null);
   const current = editing === "new" ? undefined : (editing ?? undefined);
+
+  const rootIds = new Set(rootUnits.map((r) => r.id));
+  const scopeLabel = (c: Campaign) => {
+    if (c.scope_unit_ids.some((id) => rootIds.has(id))) return "National";
+    const names = c.scope_unit_ids.map((id) => unitName(id)).filter(Boolean);
+    if (names.length === c.scope_unit_ids.length && names.length <= 2) return `${names.join(", ")} only`;
+    return `${c.scope_unit_ids.length} area${c.scope_unit_ids.length === 1 ? "" : "s"}`;
+  };
 
   const formik = useFormik<FormValues>({
     initialValues: EMPTY_FORM,
     validationSchema: schema,
-    onSubmit: async (values) => {
-      // No campaigns API yet — the pause stands in for the round trip.
-      await new Promise((r) => setTimeout(r, 450));
-
-      const record: CampaignRecord = {
-        id: current?.id ?? `c-${Date.now()}`,
+    onSubmit: async (values, helpers) => {
+      const fields = {
         name: values.name.trim(),
         party: values.party.trim(),
-        candidate: values.candidate.trim(),
-        office: values.office.trim(),
+        candidate: values.candidate.trim() || undefined,
+        office: values.office.trim() || undefined,
         cycle: values.cycle.trim(),
         status: values.status,
-        startDate: values.startDate,
-        endDate: values.endDate,
-        ...applyScope(values.scope, current),
+        starts_on: values.startDate || null,
+        ends_on: values.endDate || null,
       };
-
-      onSave(record, !current);
-      toast.success("Campaign saved");
-      setEditing(null);
+      try {
+        if (current) {
+          await save.mutateAsync({
+            kind: "update",
+            campaignId: current.id,
+            revision: current.revision,
+            fields,
+          });
+        } else {
+          await save.mutateAsync({
+            kind: "create",
+            fields,
+            slug: slugFor(values.name),
+            // New campaigns use the geography the current one is built on.
+            geographyVersionId: apiCampaign!.geography_version_id,
+            scopeUnitIds: values.scope ? [values.scope] : rootUnits.map((r) => r.id),
+          });
+        }
+        toast.success("Campaign saved");
+        setEditing(null);
+      } catch (err) {
+        const e = toApiError(err);
+        const placed = Object.entries(e.fieldErrors).filter(([k]) => FIELD_FOR[k]);
+        if (e.isValidation && placed.length) {
+          for (const [k, msg] of placed) helpers.setFieldError(FIELD_FOR[k], msg);
+          helpers.setTouched(Object.fromEntries(placed.map(([k]) => [FIELD_FOR[k], true])), false);
+        } else if (e.isConflict) {
+          helpers.setStatus("Someone else changed this campaign. Close and reopen it to edit the latest version.");
+        } else {
+          helpers.setStatus(errorMessage(e));
+        }
+      }
     },
   });
 
@@ -148,16 +198,17 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
       className={className}
       bodyClassName="p-0"
     >
-      {campaigns.length === 0 ? (
+      {isLoading ? (
+        <LoadingRows rows={2} />
+      ) : campaigns.length === 0 ? (
         <p className="px-4 py-6 text-sm text-muted-foreground sm:px-5">No campaigns yet.</p>
       ) : (
         <ul className="divide-y divide-border">
           {campaigns.map((c) => {
-            const commanding = c.id === campaignId;
-            // The global campaign filter only knows the seeded campaigns until
-            // campaigns come from the API.
-            const switchable = CAMPAIGNS.some((k) => k.id === c.id);
-            const meta = [c.party, c.cycle, c.office, c.candidate, c.scopeLabel].filter(Boolean);
+            const commanding = c.id === apiCampaign?.id;
+            // Only campaigns this account can open in the back office can be activated.
+            const switchable = workspace.some((k) => k.id === c.id);
+            const meta = [c.party, c.cycle, c.office, c.candidate, scopeLabel(c)].filter(Boolean);
 
             return (
               <li
@@ -167,7 +218,7 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="truncate text-[13px] font-semibold">{c.name}</p>
-                    <Badge tone={STATUS_TONES[c.status]}>{c.status}</Badge>
+                    <Badge tone={STATUS_TONES[c.status] ?? "muted"}>{c.status}</Badge>
                     {commanding && (
                       <Badge tone="primary" dot>
                         In command
@@ -188,7 +239,7 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
                     size="sm"
                     variant={commanding ? "outline" : "subtle"}
                     disabled={commanding || !switchable}
-                    title={switchable ? undefined : "Available once campaigns load from the API"}
+                    title={switchable ? undefined : "You don't have back-office access to this campaign"}
                     onClick={() => {
                       setCampaign(c.id);
                       toast.success(`Switched command to "${c.name}".`);
@@ -211,7 +262,7 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
           </Button>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Only National Admins can create or edit campaigns.
+            Only organization admins can create or edit campaigns.
           </p>
         )}
       </div>
@@ -268,7 +319,7 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
             />
           </FormRow>
 
-          <FormRow label="Candidate" htmlFor="cs-candidate">
+          <FormRow label="Candidate" htmlFor="cs-candidate" error={fieldError("candidate")}>
             <Input
               id="cs-candidate"
               name="candidate"
@@ -277,7 +328,7 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
             />
           </FormRow>
 
-          <FormRow label="Office" htmlFor="cs-office">
+          <FormRow label="Office" htmlFor="cs-office" error={fieldError("office")}>
             <Input
               id="cs-office"
               name="office"
@@ -299,27 +350,35 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
             />
           </FormRow>
 
-          <FormRow label="Scope" htmlFor="cs-scope">
-            <Select
-              id="cs-scope"
-              name="scope"
-              value={formik.values.scope}
-              onChange={formik.handleChange}
-              className="h-10 w-full"
-            >
-              {current && scopeOf(current) === KEEP_SCOPE && (
-                <option value={KEEP_SCOPE}>{current.scopeLabel}</option>
-              )}
-              <option value={NATIONAL}>National</option>
-              {STATE_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
+          <FormRow label="Scope" htmlFor="cs-scope" error={fieldError("scope")}>
+            {current ? (
+              <>
+                <Select id="cs-scope" disabled className="h-10 w-full opacity-70">
+                  <option>{scopeLabel(current)}</option>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  Scope is set when a campaign is created and can't be changed here.
+                </p>
+              </>
+            ) : (
+              <Select
+                id="cs-scope"
+                name="scope"
+                value={formik.values.scope}
+                onChange={formik.handleChange}
+                className="h-10 w-full"
+              >
+                <option value={NATIONAL}>National</option>
+                {stateUnits.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            )}
           </FormRow>
 
-          <FormRow label="Status" htmlFor="cs-status">
+          <FormRow label="Status" htmlFor="cs-status" error={fieldError("status")}>
             <Select
               id="cs-status"
               name="status"
@@ -327,6 +386,9 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
               onChange={formik.handleChange}
               className="h-10 w-full capitalize"
             >
+              {(SETUP_STATUSES as readonly string[]).includes(formik.values.status) ? null : (
+                <option value={formik.values.status}>{formik.values.status}</option>
+              )}
               {SETUP_STATUSES.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -335,7 +397,7 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
             </Select>
           </FormRow>
 
-          <FormRow label="Start date" htmlFor="cs-start">
+          <FormRow label="Start date" htmlFor="cs-start" error={fieldError("startDate")}>
             <Input
               id="cs-start"
               name="startDate"
@@ -357,6 +419,12 @@ export function CampaignSetup({ campaigns, onSave, isAdmin, className }: Props) 
               className={cn(fieldError("endDate") && "border-destructive/60")}
             />
           </FormRow>
+
+          {typeof formik.status === "string" && (
+            <p role="alert" className="text-[11px] text-destructive sm:col-span-2">
+              {formik.status}
+            </p>
+          )}
 
           {/* Submit on Enter without a visible duplicate button. */}
           <button type="submit" className="hidden" tabIndex={-1} aria-hidden />

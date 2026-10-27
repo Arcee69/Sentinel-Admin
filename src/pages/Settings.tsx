@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { toast } from "sonner";
 import { Bell, Check, KeyRound, Minus } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Panel } from "../components/ui/Panel";
@@ -6,26 +6,58 @@ import { Toggle } from "../components/ui/Toggle";
 import { CampaignSetup } from "../components/settings/CampaignSetup";
 import { PermissionSimulator } from "../components/settings/PermissionSimulator";
 import { UsersPanel } from "../components/settings/UsersPanel";
-import { toRecord, type CampaignRecord } from "../components/settings/model";
-import { NOTIFICATION_PREFS, PERMISSIONS, ROLE_LABELS } from "../lib/data";
-import { CAMPAIGNS } from "../lib/campaigns";
+import { PERMISSIONS, ROLE_LABELS } from "../lib/data";
 import { useAuth } from "../context/AuthContext";
+import { useFilters } from "../context/FilterContext";
+import { useOrgCampaigns, useUpdateNotificationPreferences } from "../hooks/api/useSettings";
+import { errorMessage } from "../services/errors";
+import type { NotificationPreferences } from "../services/auth";
+
+/** Preferences the API stores, with the copy each toggle shows. */
+const LIVE_PREFS: { key: keyof NotificationPreferences; label: string; detail: string }[] = [
+  {
+    key: "incidents",
+    label: "Critical incident alerts",
+    detail: "Incidents raised in your campaigns",
+  },
+  {
+    key: "assignments",
+    label: "Assignment updates",
+    detail: "Tasks and assignments that involve you",
+  },
+  {
+    key: "campaign_messages",
+    label: "Campaign messages",
+    detail: "In-app notices from your campaign",
+  },
+];
+
+/** Shown so the roadmap is visible, but there's no API to save them yet. */
+const UNAVAILABLE_PREFS = [
+  { id: "sentiment", label: "Sentiment dip warnings", detail: "When net sentiment drops 5+ pts" },
+  { id: "idle", label: "Agent idle alerts", detail: "No activity for over 4 hours" },
+  { id: "summary", label: "Daily executive summary", detail: "Delivered 07:00 WAT" },
+];
 
 export default function SettingsPage() {
-  const { access } = useAuth();
+  const { access, apiUser, activeOrganization } = useAuth();
+  const { campaigns: workspace } = useFilters();
   const isAdmin = access?.role === "admin";
 
-  const [prefs, setPrefs] = useState(NOTIFICATION_PREFS);
-  // No campaigns API yet — created and edited campaigns live for the session.
-  const [campaigns, setCampaigns] = useState<CampaignRecord[]>(() => CAMPAIGNS.map(toRecord));
+  const orgCampaigns = useOrgCampaigns(activeOrganization?.organization.id);
+  // Fall back to the session's campaigns if the organization list is refused.
+  const campaigns = orgCampaigns.data ?? (orgCampaigns.isError ? workspace : []);
 
-  function toggle(id: string, next: boolean) {
-    setPrefs((p) => p.map((n) => (n.id === id ? { ...n, on: next } : n)));
-  }
+  const savePrefs = useUpdateNotificationPreferences();
+  const prefs = apiUser?.notification_preferences;
 
-  function saveCampaign(record: CampaignRecord, isNew: boolean) {
-    setCampaigns((list) =>
-      isNew ? [record, ...list] : list.map((c) => (c.id === record.id ? record : c)),
+  function toggle(key: keyof NotificationPreferences, next: boolean) {
+    savePrefs.mutate(
+      { [key]: next },
+      {
+        onSuccess: () => toast.success("Notification preference saved"),
+        onError: (err) => toast.error(errorMessage(err)),
+      },
     );
   }
 
@@ -36,7 +68,7 @@ export default function SettingsPage() {
       <div className="grid items-start gap-5 lg:grid-cols-12">
         <CampaignSetup
           campaigns={campaigns}
-          onSave={saveCampaign}
+          isLoading={orgCampaigns.isLoading}
           isAdmin={isAdmin}
           className="lg:col-span-7"
         />
@@ -98,9 +130,9 @@ export default function SettingsPage() {
           className="lg:col-span-12"
         >
           <ul className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-            {prefs.map((n) => (
+            {LIVE_PREFS.map((n) => (
               <li
-                key={n.id}
+                key={n.key}
                 className="flex items-center gap-3 rounded-lg border border-border bg-secondary/25 p-3"
               >
                 <div className="min-w-0 flex-1">
@@ -108,10 +140,25 @@ export default function SettingsPage() {
                   <p className="truncate text-[11px] text-muted-foreground">{n.detail}</p>
                 </div>
                 <Toggle
-                  checked={n.on}
-                  onChange={(next) => toggle(n.id, next)}
+                  checked={!!prefs?.[n.key]}
+                  onChange={(next) => toggle(n.key, next)}
                   label={n.label}
+                  disabled={!prefs || (savePrefs.isPending && n.key in (savePrefs.variables ?? {}))}
                 />
+              </li>
+            ))}
+            {UNAVAILABLE_PREFS.map((n) => (
+              <li
+                key={n.id}
+                className="flex items-center gap-3 rounded-lg border border-border bg-secondary/25 p-3 opacity-70"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-medium">{n.label}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {n.detail} · Not available yet
+                  </p>
+                </div>
+                <Toggle checked={false} onChange={() => undefined} label={n.label} disabled />
               </li>
             ))}
           </ul>

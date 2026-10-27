@@ -3,60 +3,106 @@ import { Ban, Eye, FlaskConical, Pencil, RotateCcw } from "lucide-react";
 import { Panel } from "../ui/Panel";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Field";
-import { STATE_OPTIONS, type CampaignRecord } from "./model";
 import {
   ACCESS_LABELS,
-  ACTIVITY_STREAM,
   DATA_ACCESS_LEVELS,
   DATA_AREAS,
-  FIELD_REPORTS,
-  INCIDENTS,
-  LIVE_CAMPAIGNS,
   PLATFORM_ROLES,
-  POLLING_UNITS,
   ROLE_LABELS,
   ROLE_POLICIES,
   SCOPE_LABELS,
-  TASKS,
   type AccessRule,
   type DataAccess,
   type DataAreaKey,
   type DataScope,
   type PlatformRole,
 } from "../../lib/data";
+import { useFilters } from "../../context/FilterContext";
+import { useActivityFeed } from "../../hooks/api/useDashboard";
+import { useFieldReports, useTasksQuery } from "../../hooks/api/useOperations";
+import { useIncidents } from "../../hooks/api/useCommand";
+import { useBroadcasts } from "../../hooks/api/useCommunications";
+import { useRegisterEntries, useRegisterVersions } from "../../hooks/api/useParticipation";
+import { useUnitLineage } from "../../hooks/useUnitNames";
+import type { Campaign } from "../../services/settings";
 import { cn } from "../../lib/cn";
-
-/** Records behind each data area. Areas without a dataset show the scope label instead of counts. */
-const AREA_RECORDS: Partial<Record<DataAreaKey, { state: string | null }[]>> = {
-  campaign_activities: ACTIVITY_STREAM,
-  incidents: INCIDENTS,
-  field_reports: FIELD_REPORTS,
-  field_tasks: TASKS,
-  polling_units: POLLING_UNITS,
-  broadcasts: LIVE_CAMPAIGNS,
-};
 
 /** Roles whose reach is bounded by their assigned state. */
 const isStateBound = (role: PlatformRole) => role === "state_coordinator" || role === "field_agent";
 
 const selectClass = "h-8 text-xs";
 
-export function PermissionSimulator({ campaigns }: { campaigns: CampaignRecord[] }) {
+/**
+ * The real records behind each data area, as the units they belong to.
+ * `null` is a record with no place (national); everything else is placed
+ * in a state through the geography hierarchy.
+ */
+function useAreaRecords(): Partial<Record<DataAreaKey, (string | null)[]>> & { unitIds: string[] } {
+  const { apiCampaign } = useFilters();
+  const campaignId = apiCampaign?.id;
+  const activity = useActivityFeed(campaignId);
+  const incidents = useIncidents(campaignId);
+  const reports = useFieldReports(campaignId);
+  const tasks = useTasksQuery(campaignId);
+  const broadcasts = useBroadcasts(campaignId);
+  const versions = useRegisterVersions();
+  const version = (versions.data ?? []).find((v) => v.status === "published");
+  const entries = useRegisterEntries(version?.id);
+
+  return useMemo(() => {
+    const areas = {
+      campaign_activities: (activity.data?.pages ?? [])
+        .flatMap((p) => p.items)
+        .map((e) => e.geographic_unit_id),
+      incidents: (incidents.data ?? []).map((i) => i.geographic_unit_id),
+      field_reports: (reports.data ?? []).map((r) => r.geographic_unit_id),
+      field_tasks: (tasks.data ?? []).map((t) => t.geographic_unit_id),
+      polling_units: (entries.data?.entries ?? []).map((e) => e.polling_unit_id),
+      broadcasts: (broadcasts.data ?? []).map((b) => b.target_state_id),
+    };
+    const unitIds = [
+      ...new Set(Object.values(areas).flat().filter((id): id is string => !!id)),
+    ];
+    return { ...areas, unitIds };
+  }, [activity.data, incidents.data, reports.data, tasks.data, broadcasts.data, entries.data]);
+}
+
+export function PermissionSimulator({ campaigns }: { campaigns: Campaign[] }) {
+  const { stateUnits, rootUnits } = useFilters();
   const [role, setRole] = useState<PlatformRole>("state_coordinator");
-  const [state, setState] = useState("Lagos");
+  const [stateChoice, setState] = useState("");
   const [campaignId, setCampaignId] = useState("");
   const [proposed, setProposed] = useState(() => structuredClone(ROLE_POLICIES));
 
+  const state = stateChoice || stateUnits[0]?.id || "";
+  const stateName = stateUnits.find((s) => s.id === state)?.name ?? "the selected state";
+  const records = useAreaRecords();
+  const lineage = useUnitLineage(records.unitIds);
+
   const counts = useMemo(() => {
     const out: Partial<Record<DataAreaKey, { total: number; inState: number }>> = {};
-    for (const [key, rows] of Object.entries(AREA_RECORDS) as [DataAreaKey, { state: string | null }[]][]) {
-      out[key] = { total: rows.length, inState: rows.filter((r) => r.state === state).length };
+    for (const area of DATA_AREAS) {
+      const units = records[area.key];
+      if (!units) continue;
+      out[area.key] = {
+        total: units.length,
+        inState: units.filter((id) => id && lineage(id)?.state?.id === state).length,
+      };
     }
     return out;
-  }, [state]);
+  }, [records, lineage, state]);
 
+  const rootIds = new Set(rootUnits.map((r) => r.id));
   const campaign = campaigns.find((c) => c.id === campaignId);
-  const outOfScope = !!campaign?.states && isStateBound(role) && !campaign.states.includes(state);
+  const national = !campaign || campaign.scope_unit_ids.some((id) => rootIds.has(id));
+  const campaignScope = national
+    ? "national"
+    : campaign.scope_unit_ids
+        .map((id) => stateUnits.find((s) => s.id === id)?.name)
+        .filter(Boolean)
+        .join(", ") || "its own areas";
+  const outOfScope =
+    !!campaign && !national && isStateBound(role) && !campaign.scope_unit_ids.includes(state);
 
   const changeCount = DATA_AREAS.filter((a) => isChanged(ROLE_POLICIES[role][a.key], proposed[role][a.key])).length;
 
@@ -106,9 +152,9 @@ export function PermissionSimulator({ campaigns }: { campaigns: CampaignRecord[]
           onChange={(e) => setState(e.target.value)}
           disabled={!isStateBound(role)}
         >
-          {STATE_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {s}
+          {stateUnits.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
             </option>
           ))}
         </Select>
@@ -121,7 +167,14 @@ export function PermissionSimulator({ campaigns }: { campaigns: CampaignRecord[]
           <option value="">All campaigns</option>
           {campaigns.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name} ({c.states ? c.scopeLabel : "National"})
+              {c.name} (
+              {c.scope_unit_ids.some((id) => rootIds.has(id))
+                ? "National"
+                : c.scope_unit_ids
+                    .map((id) => stateUnits.find((s) => s.id === id)?.name)
+                    .filter(Boolean)
+                    .join(", ") || "Scoped"}
+              )
             </option>
           ))}
         </Select>
@@ -147,8 +200,8 @@ export function PermissionSimulator({ campaigns }: { campaigns: CampaignRecord[]
           )}
         >
           {outOfScope
-            ? `${ROLE_LABELS[role]} in ${state} would see "${campaign.name}" listed but cannot act on it — it is scoped to ${campaign.scopeLabel}.`
-            : `${ROLE_LABELS[role]} can work within "${campaign.name}" (${campaign.states ? campaign.scopeLabel : "national"}).`}
+            ? `${ROLE_LABELS[role]} in ${stateName} would see "${campaign.name}" listed but cannot act on it — it is scoped to ${campaignScope}.`
+            : `${ROLE_LABELS[role]} can work within "${campaign.name}" (${campaignScope}).`}
         </div>
       )}
 

@@ -2,16 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useQueries } from "@tanstack/react-query";
-import {
-  ChevronRight,
-  Copy,
-  KeyRound,
-  Network,
-  Plus,
-  Search,
-  TriangleAlert,
-  Users,
-} from "lucide-react";
+import { ChevronRight, Network, Plus, Search, Users } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Panel } from "../components/ui/Panel";
 import { Badge, type BadgeTone } from "../components/ui/Badge";
@@ -21,12 +12,11 @@ import { Meter } from "../components/ui/Meter";
 import { Input } from "../components/ui/Field";
 import { SegmentedControl } from "../components/ui/SegmentedControl";
 import { ErrorState, LoadingRows } from "../components/ui/AsyncState";
-import { Modal } from "../components/ui/Modal";
 import { type AgentRole, type AgentStatus } from "../lib/data";
 import { AddAgentModal } from "../components/AddAgentModal";
+import { InvitationCodeDialog } from "../components/InvitationCodeDialog";
 import { useFilters } from "../context/FilterContext";
 import { useCampaignRoster, type AgentInvitation } from "../hooks/api/useAgents";
-import { formatDate } from "../lib/format";
 import { GEO_STALE, unitsKey, useGeoUnits } from "../hooks/api/useGeography";
 import { geographyApi } from "../services/geography";
 import { cn } from "../lib/cn";
@@ -269,59 +259,15 @@ export default function Agents() {
         }}
       />
 
-      {/* The token is returned once; this is the only time it can be shown. */}
-      <Modal
-        open={!!invited}
-        onClose={() => setInvited(null)}
-        title="Invitation created"
-        description={invited ? `${invited.invitation.name} · ${invited.invitation.email}` : undefined}
-        icon={<KeyRound className="h-4.5 w-4.5" />}
-        footer={
-          <div className="flex justify-end">
-            <Button variant="primary" onClick={() => setInvited(null)}>
-              Done
-            </Button>
-          </div>
-        }
-      >
-        {invited && (
-          <div className="space-y-3 text-[12px]">
-            <p className="text-muted-foreground">
-              Share this one-time invitation code with the agent. They enter it in the field app
-              to set a password and join. It expires {formatDate(invited.invitation.expires_at)}.
-            </p>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/30 p-2.5">
-              <code className="min-w-0 flex-1 break-all font-mono text-[11px]">
-                {invited.invitation.token}
-              </code>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  navigator.clipboard
-                    .writeText(invited.invitation.token)
-                    .then(() => toast.success("Invitation code copied"))
-                    .catch(() => toast.error("Couldn't copy — select the code and copy it."))
-                }
-              >
-                <Copy className="h-3.5 w-3.5" />
-                Copy
-              </Button>
-            </div>
-            <p className="flex items-start gap-1.5 text-[11px] text-warning">
-              <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
-              This code is shown only once and can't be retrieved later.
-            </p>
-            {invited.duty && (
-              <p className="text-[11px] text-muted-foreground">
-                Planned duty: <span className="font-medium text-foreground">{invited.duty}</span>{" "}
-                — set it when you assign {invited.invitation.name.split(" ")[0]} to a campaign
-                after they accept.
-              </p>
-            )}
-          </div>
+      <InvitationCodeDialog invitation={invited?.invitation ?? null} onClose={() => setInvited(null)}>
+        {invited?.duty && (
+          <p className="text-[11px] text-muted-foreground">
+            Planned duty: <span className="font-medium text-foreground">{invited.duty}</span> — set
+            it when you assign {invited.invitation.name.split(" ")[0]} to a campaign after they
+            accept.
+          </p>
         )}
-      </Modal>
+      </InvitationCodeDialog>
     </>
   );
 }
