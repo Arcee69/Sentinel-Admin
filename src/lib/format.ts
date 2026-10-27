@@ -42,6 +42,13 @@ export function formatDateTime(value: string | null | undefined): string {
     : "—";
 }
 
+/** Compact large counts the way the KPI tiles present them: 1.2M, 640k. */
+export function formatReach(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
 export function formatCount(value: number | string | null | undefined): string {
   const n = typeof value === "string" ? Number(value) : value;
   return n == null || Number.isNaN(n) ? "—" : n.toLocaleString("en-GB");

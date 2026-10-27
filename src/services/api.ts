@@ -26,6 +26,7 @@ export const API = {
     geographicOverview: (c: string, unit: string) => `/campaigns/${c}/geographic-overview/${unit}`,
     notifications: (c: string) => `/campaigns/${c}/notifications`,
     agentActivity: (c: string) => `/campaigns/${c}/agents/activity`,
+    agent: (c: string, membership: string) => `/campaigns/${c}/agents/${membership}`,
     tasks: (c: string) => `/campaigns/${c}/tasks`,
     fieldReports: (c: string) => `/campaigns/${c}/field-reports`,
     assignments: (c: string) => `/campaigns/${c}/assignments`,
@@ -83,6 +84,11 @@ export const API = {
   organization: {
     memberships: (o: string) => `/organizations/${o}/memberships`,
     agents: (o: string) => `/organizations/${o}/agents`,
+    staffInvitations: (o: string) => `/organizations/${o}/staff-invitations`,
+  },
+
+  assignment: {
+    end: (a: string) => `/assignments/${a}/end`,
   },
 
   geography: {

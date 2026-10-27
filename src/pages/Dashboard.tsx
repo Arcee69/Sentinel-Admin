@@ -28,9 +28,8 @@ import {
 import { useAgentActivity, usePeopleDirectory } from "../hooks/api/usePeople";
 import { useUnitNames } from "../hooks/useUnitNames";
 import { useNow } from "../hooks/useNow";
-import { formatReach } from "../hooks/useScopedData";
 import { describeAlert, sortAlerts } from "../lib/alerts";
-import { humanize, isoDay, parseApiDate, relativeTime } from "../lib/format";
+import { formatReach, humanize, isoDay, parseApiDate, relativeTime } from "../lib/format";
 import { STATE_ACTIVITY, type Trend } from "../lib/data";
 import { toStateActivity } from "../lib/stateShapes";
 import { sentimentMix } from "../lib/intelligence";

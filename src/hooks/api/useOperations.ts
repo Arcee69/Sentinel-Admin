@@ -36,7 +36,7 @@ export function useAssignments(campaignId: string | undefined) {
 
 /** Task counts feed the dashboard, alerts and activity, so refresh those too. */
 function invalidateTaskViews(queryClient: ReturnType<typeof useQueryClient>, campaignId: string) {
-  for (const key of ["tasks", "overview", "alerts", "activity", "agents-activity"]) {
+  for (const key of ["tasks", "overview", "alerts", "activity", "agents-activity", "agent"]) {
     void queryClient.invalidateQueries({ queryKey: ["campaign", campaignId, key] });
   }
 }

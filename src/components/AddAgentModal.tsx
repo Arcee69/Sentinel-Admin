@@ -6,12 +6,23 @@ import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { Input, Label, Select } from "./ui/Field";
 import { useFilters } from "../context/FilterContext";
-import { AGENT_ROLES, LGAS_BY_STATE, type Agent, type AgentRole } from "../lib/data";
+import { useAuth } from "../context/AuthContext";
+import { useGeoUnits } from "../hooks/api/useGeography";
+import { useInviteAgent, type AgentInvitation } from "../hooks/api/useAgents";
+import { AGENT_ROLES, type AgentRole } from "../lib/data";
+import { errorMessage, toApiError } from "../services/errors";
 import { cn } from "../lib/cn";
 
 /** Accepts 0803… / +234803… / 234803…, ignoring spaces, dashes and brackets. */
 const PHONE_RE = /^(?:\+?234|0)[789]\d{9}$/;
 const stripPhone = (v: string) => v.replace(/[\s()-]/g, "");
+/** The API stores phones in international form, e.g. +2348031234567. */
+const toE164 = (v: string) => {
+  const p = stripPhone(v);
+  if (p.startsWith("+")) return p;
+  if (p.startsWith("234")) return `+${p}`;
+  return `+234${p.slice(1)}`;
+};
 
 const schema = Yup.object({
   name: Yup.string()
@@ -28,31 +39,35 @@ const schema = Yup.object({
     .test("ng-phone", "Enter a valid Nigerian phone number.", (v) =>
       v ? PHONE_RE.test(stripPhone(v)) : false,
     ),
-  role: Yup.string().oneOf([...AGENT_ROLES], "Select a role.").required("Role is required."),
+  role: Yup.string().oneOf(["", ...AGENT_ROLES], "Select a role."),
   state: Yup.string().required("Select a state."),
   lga: Yup.string().required("Select an LGA."),
 });
 
+/** API field → form field, for placing 422 messages. */
+const FIELD_FOR: Record<string, string> = {
+  name: "name",
+  email: "email",
+  phone: "phone",
+  home_geographic_unit_id: "lga",
+};
+
 interface Props {
   open: boolean;
   onClose: () => void;
-  onCreate: (agent: Agent) => void;
-}
-
-function initialsFrom(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "??";
-  const first = parts[0][0] ?? "";
-  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
-  return (first + last).toUpperCase();
+  /** The created invitation, including its one-time token. */
+  onCreate: (invitation: AgentInvitation, duty: AgentRole | "") => void;
 }
 
 export function AddAgentModal({ open, onClose, onCreate }: Props) {
-  const { availableStates, scope, isNationwide } = useFilters();
+  const { apiCampaign, stateUnits, scopeUnit } = useFilters();
+  const { activeOrganization } = useAuth();
+  const invite = useInviteAgent(activeOrganization?.organization.id);
+  const versionId = apiCampaign?.geography_version_id;
 
   // Pre-fill the location from the active scope — that is almost always the
   // state the operator is provisioning for.
-  const defaultState = !isNationwide && availableStates.includes(scope) ? scope : "";
+  const defaultState = scopeUnit?.id ?? "";
 
   const formik = useFormik({
     initialValues: {
@@ -65,25 +80,28 @@ export function AddAgentModal({ open, onClose, onCreate }: Props) {
     },
     validationSchema: schema,
     onSubmit: async (values, helpers) => {
-      // No API yet — the pause stands in for the round trip.
-      await new Promise((r) => setTimeout(r, 550));
-
-      onCreate({
-        id: `ag-${Date.now()}`,
-        initials: initialsFrom(values.name),
-        name: values.name.trim(),
-        role: values.role as AgentRole,
-        state: values.state,
-        lga: values.lga,
-        email: values.email.trim(),
-        phone: stripPhone(values.phone),
-        reports: 0,
-        taskPct: 0,
-        status: "active",
-      });
-
-      helpers.resetForm();
-      onClose();
+      try {
+        const invitation = await invite.mutateAsync({
+          name: values.name.trim(),
+          email: values.email.trim(),
+          role: "agent",
+          phone: toE164(values.phone),
+          geography_version_id: versionId!,
+          home_geographic_unit_id: values.lga,
+        });
+        onCreate(invitation, values.role);
+        helpers.resetForm();
+        onClose();
+      } catch (err) {
+        const e = toApiError(err);
+        const placed = Object.entries(e.fieldErrors).filter(([k]) => FIELD_FOR[k]);
+        if (e.isValidation && placed.length) {
+          for (const [k, msg] of placed) helpers.setFieldError(FIELD_FOR[k], msg);
+          helpers.setTouched(Object.fromEntries(placed.map(([k]) => [FIELD_FOR[k], true])), false);
+        } else {
+          helpers.setStatus(errorMessage(e));
+        }
+      }
     },
   });
 
@@ -93,7 +111,8 @@ export function AddAgentModal({ open, onClose, onCreate }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultState]);
 
-  const lgas = formik.values.state ? LGAS_BY_STATE[formik.values.state] : undefined;
+  const lgaQuery = useGeoUnits(formik.values.state ? versionId : undefined, formik.values.state);
+  const lgas = formik.values.state ? lgaQuery.data : undefined;
 
   function fieldError(name: keyof typeof formik.values) {
     return formik.touched[name] && formik.errors[name] ? formik.errors[name] : undefined;
@@ -104,7 +123,7 @@ export function AddAgentModal({ open, onClose, onCreate }: Props) {
       open={open}
       onClose={onClose}
       title="Add Agent"
-      description="Provision a field agent for the roster."
+      description="Invite a field agent. They join once they accept the invitation."
       icon={<UserPlus className="h-4.5 w-4.5" />}
       footer={
         <div className="flex justify-end gap-2">
@@ -114,7 +133,7 @@ export function AddAgentModal({ open, onClose, onCreate }: Props) {
           <Button
             variant="primary"
             onClick={() => formik.handleSubmit()}
-            disabled={formik.isSubmitting}
+            disabled={formik.isSubmitting || !activeOrganization}
           >
             {formik.isSubmitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -180,7 +199,7 @@ export function AddAgentModal({ open, onClose, onCreate }: Props) {
           </FormRow>
         </div>
 
-        <FormRow label="Role" htmlFor="role" error={fieldError("role")}>
+        <FormRow label="Duty when assigned" htmlFor="role" error={fieldError("role")}>
           <Select
             id="role"
             name="role"
@@ -197,6 +216,10 @@ export function AddAgentModal({ open, onClose, onCreate }: Props) {
               </option>
             ))}
           </Select>
+          <p className="text-[10px] text-muted-foreground">
+            Applied when the agent accepts and is assigned to a campaign — invitations don't
+            carry a duty.
+          </p>
         </FormRow>
 
         <fieldset className="space-y-2">
@@ -221,9 +244,9 @@ export function AddAgentModal({ open, onClose, onCreate }: Props) {
                 className={cn("h-10 w-full", fieldError("state") && "border-destructive/60")}
               >
                 <option value="">Select a state…</option>
-                {availableStates.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
+                {stateUnits.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
                   </option>
                 ))}
               </Select>
@@ -244,16 +267,29 @@ export function AddAgentModal({ open, onClose, onCreate }: Props) {
                   !lgas && "opacity-60",
                 )}
               >
-                <option value="">{lgas ? "Select an LGA…" : "Pick a state first"}</option>
+                <option value="">
+                  {lgas
+                    ? "Select an LGA…"
+                    : formik.values.state && lgaQuery.isLoading
+                      ? "Loading LGAs…"
+                      : "Pick a state first"}
+                </option>
                 {lgas?.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
+                  <option key={l.id} value={l.id}>
+                    {l.name}
                   </option>
                 ))}
               </Select>
             </FormRow>
           </div>
         </fieldset>
+
+        {typeof formik.status === "string" && (
+          <p role="alert" className="flex items-center gap-1 text-[11px] text-destructive">
+            <AlertCircle className="h-3 w-3 shrink-0" />
+            {formik.status}
+          </p>
+        )}
 
         {/* Submit on Enter without a visible duplicate button. */}
         <button type="submit" className="hidden" tabIndex={-1} aria-hidden />

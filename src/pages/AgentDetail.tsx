@@ -20,18 +20,27 @@ import { Avatar } from "../components/ui/Avatar";
 import { Meter } from "../components/ui/Meter";
 import { StatCard } from "../components/ui/StatCard";
 import { SegmentedControl } from "../components/ui/SegmentedControl";
+import { LoadingRows } from "../components/ui/AsyncState";
 import { NewTaskModal } from "../components/NewTaskModal";
-import { useRoster } from "../context/RosterContext";
-import { useTasks } from "../context/TasksContext";
+import { useFilters } from "../context/FilterContext";
+import { useAuth } from "../context/AuthContext";
+import { useAgentDetail } from "../hooks/api/useAgents";
+import { useAgentActivity } from "../hooks/api/usePeople";
+import { useUnitLineage } from "../hooks/useUnitNames";
+import { useNow } from "../hooks/useNow";
+import { dutyLabel, initialsOf, presenceOf } from "../lib/agents";
 import {
-  AGENTS,
-  FIELD_REPORTS,
-  type AgentStatus,
-  type Priority,
-  type ReportType,
-  type TaskCategory,
-  type TaskStatus,
-} from "../lib/data";
+  CATEGORY_LABEL,
+  METHOD_LABEL,
+  PRIORITY_LABEL,
+  STATUS_LABEL,
+  formatDue,
+  subjectLabel,
+  type BoardStatus,
+} from "../lib/tasks";
+import { humanize, relativeTime } from "../lib/format";
+import { errorMessage, toApiError } from "../services/errors";
+import type { AgentStatus, Priority, ReportType, TaskCategory } from "../lib/data";
 import { cn } from "../lib/cn";
 
 const STATUS_TONE: Record<AgentStatus, BadgeTone> = {
@@ -46,10 +55,11 @@ const PRIORITY_TONE: Record<Priority, BadgeTone> = {
   Low: "info",
 };
 
-const TASK_STATUS_TONE: Record<TaskStatus, BadgeTone> = {
+const TASK_STATUS_TONE: Record<BoardStatus, BadgeTone> = {
   Pending: "muted",
   "In Progress": "primary",
   Completed: "success",
+  Cancelled: "muted",
 };
 
 const CATEGORY_TONE: Record<TaskCategory, BadgeTone> = {
@@ -69,36 +79,50 @@ const TYPE_TONE: Record<ReportType, BadgeTone> = {
 const TASK_FILTERS = ["All", "Pending", "In Progress", "Completed"] as const;
 
 export default function AgentDetail() {
+  // The route ID is the agent's membership ID.
   const { agentId = "" } = useParams();
   const navigate = useNavigate();
-  const { created } = useRoster();
-  const { tasks } = useTasks();
+  const { apiCampaign } = useFilters();
+  const { access } = useAuth();
+  const now = useNow();
   const [taskFilter, setTaskFilter] = useState<(typeof TASK_FILTERS)[number]>("All");
   const [assignOpen, setAssignOpen] = useState(false);
 
-  // Looked up across the whole roster, not the scoped slice — arriving here is
-  // a deliberate navigation, so the current filter shouldn't 404 the page.
-  const agent = useMemo(
-    () => [...created, ...AGENTS].find((a) => a.id === agentId),
-    [created, agentId],
-  );
+  const detailQuery = useAgentDetail(apiCampaign?.id, agentId);
+  const activity = useAgentActivity(apiCampaign?.id);
+  const detail = detailQuery.data;
 
-  const agentTasks = useMemo(
-    () => tasks.filter((t) => t.assigneeId === agentId),
-    [tasks, agentId],
+  const assignment = detail?.assignments.find((a) => a.ends_at == null) ?? detail?.assignments[0];
+  const lineageIds = useMemo(
+    () => [
+      assignment?.geographic_unit_id,
+      detail?.agent_profile?.home_geographic_unit_id,
+      ...(detail?.recent_field_reports ?? []).map((r) => r.geographic_unit_id),
+    ],
+    [assignment, detail],
   );
+  const lineage = useUnitLineage(lineageIds);
 
-  const reports = useMemo(
-    () => FIELD_REPORTS.filter((r) => r.agentId === agentId),
-    [agentId],
-  );
-
-  if (!agent) {
+  if (detailQuery.isLoading) {
     return (
-      <Panel title="Agent not found">
+      <Panel title="Loading agent…">
+        <LoadingRows rows={4} padded={false} />
+      </Panel>
+    );
+  }
+
+  if (!detail) {
+    const notFound = toApiError(detailQuery.error).status === 404;
+    return (
+      <Panel title={notFound ? "Agent not found" : "Couldn't load this agent"}>
         <p className="text-sm text-muted-foreground">
-          No agent matches <span className="font-mono">{agentId}</span>. They may have been
-          added in a previous session — session-provisioned agents reset on reload.
+          {notFound ? (
+            <>
+              No agent in this campaign matches <span className="font-mono">{agentId}</span>.
+            </>
+          ) : (
+            errorMessage(detailQuery.error)
+          )}
         </p>
         <Button variant="outline" className="mt-4" onClick={() => navigate("/agents")}>
           <ArrowLeft className="h-4 w-4" />
@@ -108,10 +132,27 @@ export default function AgentDetail() {
     );
   }
 
+  const name = detail.user.name;
+  const firstName = name.split(" ")[0];
+  const role = dutyLabel(assignment?.duty);
+  const place = lineage(assignment?.geographic_unit_id ?? detail.agent_profile?.home_geographic_unit_id);
+  const location = [place?.state?.name, place?.lga?.name].filter(Boolean).join(" · ") || "—";
+  const heartbeat = activity.data?.agents.find((a) => a.membership_id === agentId)?.last_heartbeat_at;
+  const status = presenceOf(heartbeat, now);
+
+  const agentTasks = detail.recent_tasks;
   const visibleTasks =
-    taskFilter === "All" ? agentTasks : agentTasks.filter((t) => t.status === taskFilter);
-  const completed = agentTasks.filter((t) => t.status === "Completed").length;
-  const open = agentTasks.length - completed;
+    taskFilter === "All"
+      ? agentTasks
+      : agentTasks.filter((t) => STATUS_LABEL[t.status] === taskFilter);
+  const completed = detail.stats.tasks_completed;
+  const open = agentTasks.filter((t) => t.status === "open" || t.status === "in_progress").length;
+  const taskPct = Math.round(
+    detail.stats.task_completion_percent ??
+      (detail.stats.tasks_total ? (completed / detail.stats.tasks_total) * 100 : 0),
+  );
+  const reports = detail.recent_field_reports;
+  const totalReports = detail.stats.field_reports + detail.stats.polling_reports;
 
   return (
     <>
@@ -124,14 +165,18 @@ export default function AgentDetail() {
       </Link>
 
       <PageHeader
-        title={agent.name}
-        subtitle={`${agent.role} · ${agent.state} · ${agent.lga}`}
+        title={name}
+        subtitle={`${role} · ${location}`}
         actions={
           <>
-            <Badge tone={STATUS_TONE[agent.status]} dot>
-              {agent.status}
+            <Badge tone={STATUS_TONE[status]} dot>
+              {status}
             </Badge>
-            <Button variant="primary" onClick={() => setAssignOpen(true)}>
+            <Button
+              variant="primary"
+              onClick={() => setAssignOpen(true)}
+              disabled={!access?.can_manage || !assignment || assignment.ends_at != null}
+            >
               <Plus className="h-4 w-4" />
               Assign Task
             </Button>
@@ -142,29 +187,29 @@ export default function AgentDetail() {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Reports Submitted"
-          value={agent.reports.toLocaleString()}
+          value={totalReports.toLocaleString()}
           caption={`${reports.length} in the recent feed`}
           tone="primary"
           icon={<Rss className="h-4 w-4" />}
         />
         <StatCard
           label="Task Completion"
-          value={`${agent.taskPct}%`}
-          caption="Rolling 30-day rate"
+          value={`${taskPct}%`}
+          caption="Of tasks assigned in this campaign"
           tone="accent"
           icon={<ClipboardList className="h-4 w-4" />}
         />
         <StatCard
           label="Open Tasks"
           value={String(open)}
-          caption={`${agentTasks.length} assigned in total`}
+          caption={`${detail.stats.tasks_total} assigned in total`}
           tone="warning"
           icon={<CalendarClock className="h-4 w-4" />}
         />
         <StatCard
           label="Completed"
           value={String(completed)}
-          caption="Across all campaigns"
+          caption="In this campaign"
           tone="info"
           icon={<ClipboardList className="h-4 w-4" />}
         />
@@ -174,7 +219,7 @@ export default function AgentDetail() {
         <div className="space-y-5">
           <Panel
             title="Assigned Tasks"
-            subtitle={`${agentTasks.length} task${agentTasks.length === 1 ? "" : "s"} across all campaigns`}
+            subtitle={`${agentTasks.length} recent task${agentTasks.length === 1 ? "" : "s"} in this campaign`}
             icon={<ClipboardList className="h-4 w-4" />}
             bodyClassName="p-0"
           >
@@ -188,49 +233,59 @@ export default function AgentDetail() {
             </div>
 
             <ul className="divide-y divide-border">
-              {visibleTasks.map((t) => (
-                <li key={t.id} className="px-4 py-3.5 sm:px-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <p
-                      className={cn(
-                        "text-[13px] font-medium leading-snug",
-                        t.status === "Completed" && "text-muted-foreground line-through",
-                      )}
-                    >
-                      {t.title}
-                    </p>
-                    <Badge tone={PRIORITY_TONE[t.priority]} className="shrink-0">
-                      {t.priority}
-                    </Badge>
-                  </div>
+              {visibleTasks.map((t) => {
+                const taskStatus = STATUS_LABEL[t.status];
+                const priority = PRIORITY_LABEL[t.priority];
+                const category = t.category ? CATEGORY_LABEL[t.category] : null;
+                const done = t.status === "completed" || t.status === "cancelled";
+                return (
+                  <li key={t.id} className="px-4 py-3.5 sm:px-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <p
+                        className={cn(
+                          "text-[13px] font-medium leading-snug",
+                          done && "text-muted-foreground line-through",
+                        )}
+                      >
+                        {t.title}
+                      </p>
+                      <Badge tone={PRIORITY_TONE[priority]} className="shrink-0">
+                        {priority}
+                      </Badge>
+                    </div>
 
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <Badge tone={CATEGORY_TONE[t.category]}>{t.category}</Badge>
-                    <span className="text-[11px] text-muted-foreground">{t.subject}</span>
-                  </div>
+                    {(category || t.subject) && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        {category && <Badge tone={CATEGORY_TONE[category]}>{category}</Badge>}
+                        <span className="text-[11px] text-muted-foreground">
+                          {subjectLabel(t.subject)}
+                        </span>
+                      </div>
+                    )}
 
-                  {t.notes && (
-                    <p className="mt-1.5 text-[11px] italic leading-relaxed text-muted-foreground">
-                      “{t.notes}”
-                    </p>
-                  )}
+                    {t.instructions && (
+                      <p className="mt-1.5 text-[11px] italic leading-relaxed text-muted-foreground">
+                        “{t.instructions}”
+                      </p>
+                    )}
 
-                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
-                    <span className="inline-flex items-center gap-1">
-                      <CalendarClock className="h-3 w-3" />
-                      Due {t.due}
-                    </span>
-                    <span className="ml-auto">
-                      <Badge tone={TASK_STATUS_TONE[t.status]}>{t.status}</Badge>
-                    </span>
-                  </div>
-                </li>
-              ))}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <CalendarClock className="h-3 w-3" />
+                        Due {formatDue(t.due_at, new Date(now))}
+                      </span>
+                      <span className="ml-auto">
+                        <Badge tone={TASK_STATUS_TONE[taskStatus]}>{taskStatus}</Badge>
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
 
               {visibleTasks.length === 0 && (
                 <li className="px-5 py-10 text-center text-sm text-muted-foreground">
                   {agentTasks.length === 0
-                    ? `No tasks assigned to ${agent.name.split(" ")[0]} yet.`
+                    ? `No tasks assigned to ${firstName} yet.`
                     : `No ${taskFilter.toLowerCase()} tasks.`}
                 </li>
               )}
@@ -244,22 +299,34 @@ export default function AgentDetail() {
             bodyClassName="p-0"
           >
             <ol className="divide-y divide-border">
-              {reports.map((r) => (
-                <li key={r.id} className="px-4 py-3.5 sm:px-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <Badge tone={TYPE_TONE[r.type]}>{r.type}</Badge>
-                    <span className="font-mono text-[10px] text-muted-foreground">{r.time}</span>
-                  </div>
-                  <p className="mt-2 text-[13px] leading-relaxed">{r.body}</p>
-                  <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
-                    {r.location}
-                  </p>
-                </li>
-              ))}
+              {reports.map((r) => {
+                const type = r.collection_method ? METHOD_LABEL[r.collection_method] : null;
+                const where = lineage(r.geographic_unit_id);
+                return (
+                  <li key={r.id} className="px-4 py-3.5 sm:px-5">
+                    <div className="flex items-center justify-between gap-3">
+                      {type ? (
+                        <Badge tone={TYPE_TONE[type]}>{type}</Badge>
+                      ) : (
+                        <Badge tone="muted">{humanize(r.activity_type)}</Badge>
+                      )}
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {relativeTime(r.observed_at, now)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-[13px] leading-relaxed">{r.narrative}</p>
+                    <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
+                      {[where?.state?.name, where?.lga?.name, where?.ward?.name]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </p>
+                  </li>
+                );
+              })}
 
               {reports.length === 0 && (
                 <li className="px-5 py-10 text-center text-sm text-muted-foreground">
-                  {agent.name.split(" ")[0]} has not filed a report yet.
+                  {firstName} has not filed a report yet.
                 </li>
               )}
             </ol>
@@ -269,25 +336,25 @@ export default function AgentDetail() {
         <Panel title="Profile" icon={<UserCircle className="h-4 w-4" />}>
           <div className="flex items-center gap-3">
             <Avatar
-              initials={agent.initials}
+              initials={initialsOf(name)}
               className="h-12 w-12 text-sm"
-              tone={agent.status === "active" ? "primary" : "muted"}
+              tone={status === "active" ? "primary" : "muted"}
             />
             <div className="min-w-0">
-              <p className="truncate text-[14px] font-semibold">{agent.name}</p>
-              <p className="truncate text-[11px] text-muted-foreground">{agent.role}</p>
+              <p className="truncate text-[14px] font-semibold">{name}</p>
+              <p className="truncate text-[11px] text-muted-foreground">{role}</p>
             </div>
           </div>
 
           <dl className="mt-4 space-y-3 border-t border-border pt-4">
             <Row icon={<MapPin className="h-3.5 w-3.5" />} label="Location">
-              {agent.state} · {agent.lga}
+              {location}
             </Row>
             <Row icon={<Mail className="h-3.5 w-3.5" />} label="Email">
-              {agent.email ?? "—"}
+              {detail.user.email ?? "—"}
             </Row>
             <Row icon={<Phone className="h-3.5 w-3.5" />} label="Phone">
-              {agent.phone ?? "—"}
+              {detail.agent_profile?.phone ?? detail.user.phone ?? "—"}
             </Row>
           </dl>
 
@@ -296,20 +363,14 @@ export default function AgentDetail() {
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
                 Task completion
               </span>
-              <span className="font-mono text-sm font-semibold tabular-nums">
-                {agent.taskPct}%
-              </span>
+              <span className="font-mono text-sm font-semibold tabular-nums">{taskPct}%</span>
             </div>
             <Meter
-              value={agent.taskPct}
+              value={taskPct}
               className="mt-2"
               height="h-2"
               barClassName={
-                agent.taskPct >= 85
-                  ? "bg-success"
-                  : agent.taskPct >= 70
-                    ? "bg-warning"
-                    : "bg-destructive"
+                taskPct >= 85 ? "bg-success" : taskPct >= 70 ? "bg-warning" : "bg-destructive"
               }
             />
           </div>
@@ -319,7 +380,7 @@ export default function AgentDetail() {
       <NewTaskModal
         open={assignOpen}
         onClose={() => setAssignOpen(false)}
-        presetAgentId={agent.id}
+        presetAgentId={agentId}
         onCreate={(task) => {
           toast.success(`${task.category} assigned to ${task.assignee} — due ${task.due}.`);
         }}
