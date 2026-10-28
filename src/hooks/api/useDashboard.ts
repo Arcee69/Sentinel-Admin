@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { dashboardApi, type ParticipationMode } from "../../services/dashboard";
 
-const ACTIVITY_PAGE = 15;
+const ACTIVITY_PAGE = 10;
 
 export function useDashboardOverview(
   campaignId: string | undefined,

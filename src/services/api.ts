@@ -30,6 +30,7 @@ export const API = {
     geographicGrants: (c: string) => `/campaigns/${c}/geographic-grants`,
     tasks: (c: string) => `/campaigns/${c}/tasks`,
     fieldReports: (c: string) => `/campaigns/${c}/field-reports`,
+    media: (c: string) => `/campaigns/${c}/media`,
     assignments: (c: string) => `/campaigns/${c}/assignments`,
     broadcasts: (c: string) => `/campaigns/${c}/broadcasts`,
     commandPollingUnits: (c: string) => `/campaigns/${c}/command/polling-units`,
@@ -55,6 +56,10 @@ export const API = {
 
   pollingReport: {
     reviews: (r: string) => `/polling-reports/${r}/reviews`,
+  },
+
+  media: {
+    downloadLink: (m: string) => `/media/${m}/download-link`,
   },
 
   registerDiscrepancy: {

@@ -1,3 +1,4 @@
+import apiInstance from "./instance";
 import { API } from "./api";
 import { getAllPages, getMethod, postMethod } from "./requests";
 
@@ -55,6 +56,26 @@ export interface ApiFieldReport {
   client_submission_id: string;
 }
 
+/**
+ * A file an agent attached to a report or incident. It can only be
+ * downloaded once the scanner marks it clean and a reviewer approves it.
+ */
+export interface MediaEvidence {
+  id: string;
+  campaign_id: string;
+  uploaded_by_membership_id: string;
+  incident_id: string | null;
+  field_report_id: string | null;
+  polling_report_id: string | null;
+  original_filename: string;
+  media_type: string;
+  byte_size: number;
+  scan_state: string;
+  review_state: string;
+  review_reason: string | null;
+  created_at: string;
+}
+
 export interface Assignment {
   id: string;
   organization_id: string;
@@ -92,4 +113,12 @@ export const operationsApi = {
     getAllPages<ApiFieldReport>(API.campaign.fieldReports(campaignId)),
   assignments: (campaignId: string) =>
     getAllPages<Assignment>(API.campaign.assignments(campaignId)),
+  media: (campaignId: string) => getAllPages<MediaEvidence>(API.campaign.media(campaignId)),
+  /** A short-lived signed URL; refused until the file is scanned clean and approved. */
+  mediaDownloadLink: (mediaId: string) =>
+    getMethod<{ url: string; expires_at: string }>(API.media.downloadLink(mediaId)),
+  downloadMedia: async (url: string) => {
+    const res = await apiInstance.get<Blob>(url, { responseType: "blob" });
+    return res.data;
+  },
 };

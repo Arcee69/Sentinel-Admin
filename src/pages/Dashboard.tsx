@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -16,7 +16,7 @@ import { Panel } from "../components/ui/Panel";
 import { StatCard } from "../components/ui/StatCard";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
-import { ErrorState, LoadingRows } from "../components/ui/AsyncState";
+import { ErrorState, InlineSpinner, LoadingRows } from "../components/ui/AsyncState";
 import { NigeriaMap } from "../components/charts/NigeriaMap";
 import { useFilters } from "../context/FilterContext";
 import {
@@ -140,9 +140,34 @@ export default function Dashboard() {
     unitId: scopeUnit?.id,
   });
   const activity = useActivityFeed(campaignId);
+  const [streamPage, setStreamPage] = useState(0);
 
   const criticalAlerts = sortAlerts(alertsQuery.data?.items ?? []);
   const activityStream = activity.data?.pages[0]?.items ?? [];
+
+  // The feed is cursor-paged: pages load as the user steps forward, and a
+  // page left over from another campaign falls back to the last one loaded.
+  const loadedPages = activity.data?.pages.length ?? 0;
+  const safeStreamPage = Math.max(0, Math.min(streamPage, loadedPages - 1));
+  const streamItems = useMemo(
+    () =>
+      [...(activity.data?.pages[safeStreamPage]?.items ?? [])].sort(
+        (a, b) =>
+          (parseApiDate(b.occurred_at)?.getTime() ?? 0) -
+          (parseApiDate(a.occurred_at)?.getTime() ?? 0),
+      ),
+    [activity.data, safeStreamPage],
+  );
+  const canStreamNext = safeStreamPage + 1 < loadedPages || activity.hasNextPage;
+
+  async function nextStreamPage() {
+    const target = safeStreamPage + 1;
+    if (target >= loadedPages) {
+      const res = await activity.fetchNextPage();
+      if ((res.data?.pages.length ?? 0) <= target) return;
+    }
+    setStreamPage(target);
+  }
 
   // States the map has no shape for (e.g. a demo geography) are left off
   // rather than drawn in the wrong place.
@@ -234,16 +259,10 @@ export default function Dashboard() {
         title="National Command Dashboard"
         subtitle={`Real-time visibility across ${scopeLabel}`}
         actions={
-          <>
-            <Button variant="outline" size="md">
-              <ClipboardList className="h-4 w-4" />
-              Submit Report
-            </Button>
-            <Button variant="primary" size="md" onClick={() => navigate("/command")}>
-              <Radio className="h-4 w-4" />
-              Open Command Center
-            </Button>
-          </>
+          <Button variant="primary" size="md" onClick={() => navigate("/command")}>
+            <Radio className="h-4 w-4" />
+            Open Command Center
+          </Button>
         }
       />
 
@@ -348,39 +367,67 @@ export default function Dashboard() {
           ) : activity.isError ? (
             <ErrorState error={activity.error} onRetry={() => activity.refetch()} />
           ) : (
-            <ol className="divide-y divide-border">
-              {activityStream.map((s) => {
-                const d = describeEvent(s.event_type);
-                const place = unitName(s.geographic_unit_id);
-                return (
-                  <li key={s.id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
-                    <span className="relative mt-1.5 flex h-2 w-2 shrink-0">
-                      <span
-                        className={cn(
-                          "absolute inline-flex h-full w-full rounded-full opacity-60",
-                          STREAM_DOT[d.tone],
-                        )}
-                      />
-                      <span
-                        className={cn(
-                          "relative inline-flex h-2 w-2 rounded-full",
-                          STREAM_DOT[d.tone],
-                        )}
-                      />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] leading-snug">
-                        <span className="font-semibold">{personName(s.actor_membership_id)}</span>{" "}
-                        <span className="text-muted-foreground">{d.action}</span>
-                      </p>
-                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                        {[relativeTime(s.occurred_at), place].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
+            <>
+              <ol className="divide-y divide-border">
+                {streamItems.map((s) => {
+                  const d = describeEvent(s.event_type);
+                  const place = unitName(s.geographic_unit_id);
+                  return (
+                    <li key={s.id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
+                      <span className="relative mt-1.5 flex h-2 w-2 shrink-0">
+                        <span
+                          className={cn(
+                            "absolute inline-flex h-full w-full rounded-full opacity-60",
+                            STREAM_DOT[d.tone],
+                          )}
+                        />
+                        <span
+                          className={cn(
+                            "relative inline-flex h-2 w-2 rounded-full",
+                            STREAM_DOT[d.tone],
+                          )}
+                        />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] leading-snug">
+                          <span className="font-semibold">{personName(s.actor_membership_id)}</span>{" "}
+                          <span className="text-muted-foreground">{d.action}</span>
+                        </p>
+                        <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                          {[relativeTime(s.occurred_at), place].filter(Boolean).join(" · ")}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+              {(loadedPages > 1 || activity.hasNextPage) && (
+                <div className="flex items-center justify-between border-t border-border px-4 py-2.5 text-xs text-muted-foreground sm:px-5">
+                  <span className="inline-flex items-center gap-2">
+                    Page {safeStreamPage + 1}
+                    {activity.isFetchingNextPage && <InlineSpinner />}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={safeStreamPage === 0}
+                      onClick={() => setStreamPage(safeStreamPage - 1)}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canStreamNext || activity.isFetchingNextPage}
+                      onClick={() => void nextStreamPage()}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </Panel>
 

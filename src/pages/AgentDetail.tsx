@@ -22,6 +22,7 @@ import { StatCard } from "../components/ui/StatCard";
 import { SegmentedControl } from "../components/ui/SegmentedControl";
 import { LoadingRows } from "../components/ui/AsyncState";
 import { NewTaskModal } from "../components/NewTaskModal";
+import { FieldReportDialog } from "../components/FieldReportDialog";
 import { useFilters } from "../context/FilterContext";
 import { useAuth } from "../context/AuthContext";
 import { useAgentDetail } from "../hooks/api/useAgents";
@@ -41,6 +42,7 @@ import {
 import { humanize, relativeTime } from "../lib/format";
 import { errorMessage, toApiError } from "../services/errors";
 import type { AgentStatus, Priority, ReportType, TaskCategory } from "../lib/data";
+import type { ApiFieldReport } from "../services/operations";
 import { cn } from "../lib/cn";
 
 const STATUS_TONE: Record<AgentStatus, BadgeTone> = {
@@ -87,6 +89,7 @@ export default function AgentDetail() {
   const now = useNow();
   const [taskFilter, setTaskFilter] = useState<(typeof TASK_FILTERS)[number]>("All");
   const [assignOpen, setAssignOpen] = useState(false);
+  const [viewing, setViewing] = useState<ApiFieldReport | null>(null);
 
   const detailQuery = useAgentDetail(apiCampaign?.id, agentId);
   const activity = useAgentActivity(apiCampaign?.id);
@@ -303,23 +306,28 @@ export default function AgentDetail() {
                 const type = r.collection_method ? METHOD_LABEL[r.collection_method] : null;
                 const where = lineage(r.geographic_unit_id);
                 return (
-                  <li key={r.id} className="px-4 py-3.5 sm:px-5">
-                    <div className="flex items-center justify-between gap-3">
-                      {type ? (
-                        <Badge tone={TYPE_TONE[type]}>{type}</Badge>
-                      ) : (
-                        <Badge tone="muted">{humanize(r.activity_type)}</Badge>
-                      )}
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        {relativeTime(r.observed_at, now)}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-[13px] leading-relaxed">{r.narrative}</p>
-                    <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
-                      {[where?.state?.name, where?.lga?.name, where?.ward?.name]
-                        .filter(Boolean)
-                        .join(" · ") || "—"}
-                    </p>
+                  <li key={r.id}>
+                    <button
+                      onClick={() => setViewing(r)}
+                      className="w-full cursor-pointer px-4 py-3.5 text-left transition-colors hover:bg-secondary/40 sm:px-5"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        {type ? (
+                          <Badge tone={TYPE_TONE[type]}>{type}</Badge>
+                        ) : (
+                          <Badge tone="muted">{humanize(r.activity_type)}</Badge>
+                        )}
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {relativeTime(r.observed_at, now)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-[13px] leading-relaxed">{r.narrative}</p>
+                      <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
+                        {[where?.state?.name, where?.lga?.name, where?.ward?.name]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
+                      </p>
+                    </button>
                   </li>
                 );
               })}
@@ -376,6 +384,8 @@ export default function AgentDetail() {
           </div>
         </Panel>
       </div>
+
+      <FieldReportDialog report={viewing} onClose={() => setViewing(null)} />
 
       <NewTaskModal
         open={assignOpen}

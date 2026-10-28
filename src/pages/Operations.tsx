@@ -21,6 +21,7 @@ import { ErrorState, LoadingRows } from "../components/ui/AsyncState";
 import { StateHeatmap } from "../components/charts/StateHeatmap";
 import { REPORT_TYPES, type Priority, type ReportType, type TaskCategory } from "../lib/data";
 import { NewTaskModal } from "../components/NewTaskModal";
+import { FieldReportDialog } from "../components/FieldReportDialog";
 import { useFilters } from "../context/FilterContext";
 import { useAuth } from "../context/AuthContext";
 import { useCancelTask, useFieldReports, useTasksQuery } from "../hooks/api/useOperations";
@@ -40,7 +41,7 @@ import {
 import { humanize, isoDay, relativeTime } from "../lib/format";
 import { toStateActivity } from "../lib/stateShapes";
 import { errorMessage, toApiError } from "../services/errors";
-import type { ApiTask } from "../services/operations";
+import type { ApiFieldReport, ApiTask } from "../services/operations";
 import { cn } from "../lib/cn";
 
 const PRIORITY_TONE: Record<Priority, BadgeTone> = {
@@ -84,6 +85,7 @@ export default function Operations() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All types");
   const [taskOpen, setTaskOpen] = useState(false);
   const [cancelling, setCancelling] = useState<ApiTask | null>(null);
+  const [viewing, setViewing] = useState<ApiFieldReport | null>(null);
 
   const { apiCampaign, scopeLabel, scopeUnit } = useFilters();
   const { access } = useAuth();
@@ -279,23 +281,28 @@ export default function Operations() {
               {visibleReports.map((r) => {
                 const type = r.collection_method ? METHOD_LABEL[r.collection_method] : null;
                 return (
-                  <li key={r.id} className="px-4 py-3.5 sm:px-5">
-                    <div className="flex items-center justify-between gap-3">
-                      {type ? (
-                        <Badge tone={TYPE_TONE[type]}>{type}</Badge>
-                      ) : (
-                        <Badge tone="muted">{humanize(r.activity_type)}</Badge>
-                      )}
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        {relativeTime(r.observed_at, now)}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-[13px] leading-relaxed">{r.narrative}</p>
-                    <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
-                      {[personName(r.author_membership_id), unitName(r.geographic_unit_id)]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
+                  <li key={r.id}>
+                    <button
+                      onClick={() => setViewing(r)}
+                      className="w-full cursor-pointer px-4 py-3.5 text-left transition-colors hover:bg-secondary/40 sm:px-5"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        {type ? (
+                          <Badge tone={TYPE_TONE[type]}>{type}</Badge>
+                        ) : (
+                          <Badge tone="muted">{humanize(r.activity_type)}</Badge>
+                        )}
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {relativeTime(r.observed_at, now)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-[13px] leading-relaxed">{r.narrative}</p>
+                      <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
+                        {[personName(r.author_membership_id), unitName(r.geographic_unit_id)]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </button>
                   </li>
                 );
               })}
@@ -322,6 +329,8 @@ export default function Operations() {
           <StateHeatmap states={states} showReports />
         )}
       </Panel>
+
+      <FieldReportDialog report={viewing} onClose={() => setViewing(null)} />
 
       <NewTaskModal
         open={taskOpen}

@@ -7,7 +7,18 @@ export const opsKeys = {
   tasks: (c?: string) => ["campaign", c, "tasks"] as const,
   fieldReports: (c?: string) => ["campaign", c, "field-reports"] as const,
   assignments: (c?: string) => ["campaign", c, "assignments"] as const,
+  media: (c?: string) => ["campaign", c, "media"] as const,
 };
+
+/** Evidence files across the campaign; callers pick out a report's own. */
+export function useCampaignMedia(campaignId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: opsKeys.media(campaignId),
+    queryFn: () => operationsApi.media(campaignId!),
+    enabled: !!campaignId && enabled,
+    staleTime: 30_000,
+  });
+}
 
 export function useTasksQuery(campaignId: string | undefined) {
   return useQuery({
