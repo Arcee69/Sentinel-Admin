@@ -12,6 +12,8 @@ export interface ParticipationUnit {
   official_code: string;
   name: string;
   eligible_polling_places: number;
+  /** Registered voters under the unit across the whole register. */
+  registered_total: number | null;
   accredited_persons: ParticipationMetric;
   participating_persons: ParticipationMetric;
 }

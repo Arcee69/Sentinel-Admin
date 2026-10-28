@@ -4,9 +4,9 @@
  *
  * Counts, rates and coverage come from the server's aggregates, which apply
  * the selected mode and exclude conflicting or quality-flagged reports — the
- * same figures the Dashboard shows. What the aggregates don't carry
- * (the full INEC register total, verification mix, anomalies) is rolled up
- * locally from register entries, reports and quality cases.
+ * same figures the Dashboard shows, including each unit's full register
+ * total. What the aggregates don't carry (verification mix, anomalies) is
+ * rolled up locally from register entries, reports and quality cases.
  */
 import { scoreConfidence, type LevelSummary } from "./participation";
 import type {
@@ -126,6 +126,8 @@ export function toLevelSummary(input: {
   lga?: string;
   ward?: string;
   eligiblePlaces: number;
+  /** The server's register total for the unit; the local roll-up stands in when absent. */
+  registeredTotal: number | null | undefined;
   accredited: ParticipationMetric;
   participating: ParticipationMetric;
   stats: UnitStats | undefined;
@@ -135,7 +137,7 @@ export function toLevelSummary(input: {
   historicalTurnout?: number | null;
 }): LevelSummary {
   const s = input.stats ?? { ...emptyStats(), registered: NaN };
-  const registered = s.registered;
+  const registered = input.registeredTotal ?? s.registered;
   const coveredRegistered = input.participating.registered_denominator;
   const voterCoverage =
     Number.isFinite(registered) && registered > 0

@@ -7,6 +7,9 @@ export interface NotificationPreferences {
   incidents: boolean;
   assignments: boolean;
   campaign_messages: boolean;
+  sentiment_dip_warnings: boolean;
+  agent_idle_alerts: boolean;
+  daily_executive_summary: boolean;
 }
 
 export interface ApiUser {

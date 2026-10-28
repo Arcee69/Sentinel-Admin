@@ -30,13 +30,21 @@ const LIVE_PREFS: { key: keyof NotificationPreferences; label: string; detail: s
     label: "Campaign messages",
     detail: "In-app notices from your campaign",
   },
-];
-
-/** Shown so the roadmap is visible, but there's no API to save them yet. */
-const UNAVAILABLE_PREFS = [
-  { id: "sentiment", label: "Sentiment dip warnings", detail: "When net sentiment drops 5+ pts" },
-  { id: "idle", label: "Agent idle alerts", detail: "No activity for over 4 hours" },
-  { id: "summary", label: "Daily executive summary", detail: "Delivered 07:00 WAT" },
+  {
+    key: "sentiment_dip_warnings",
+    label: "Sentiment dip warnings",
+    detail: "When net sentiment drops 5+ pts",
+  },
+  {
+    key: "agent_idle_alerts",
+    label: "Agent idle alerts",
+    detail: "No activity for over 4 hours",
+  },
+  {
+    key: "daily_executive_summary",
+    label: "Daily executive summary",
+    detail: "Delivered 07:00 WAT",
+  },
 ];
 
 export default function SettingsPage() {
@@ -145,20 +153,6 @@ export default function SettingsPage() {
                   label={n.label}
                   disabled={!prefs || (savePrefs.isPending && n.key in (savePrefs.variables ?? {}))}
                 />
-              </li>
-            ))}
-            {UNAVAILABLE_PREFS.map((n) => (
-              <li
-                key={n.id}
-                className="flex items-center gap-3 rounded-lg border border-border bg-secondary/25 p-3 opacity-70"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-medium">{n.label}</p>
-                  <p className="truncate text-[11px] text-muted-foreground">
-                    {n.detail} · Not available yet
-                  </p>
-                </div>
-                <Toggle checked={false} onChange={() => undefined} label={n.label} disabled />
               </li>
             ))}
           </ul>

@@ -26,6 +26,8 @@ export interface ParticipationSummary extends Provenance {
   geographic_unit_id: string | null;
   mode: ParticipationMode;
   eligible_polling_places: number;
+  /** Registered voters under the unit across the whole register. */
+  registered_total: number | null;
   accredited_persons: ParticipationMetric;
   participating_persons: ParticipationMetric;
 }
