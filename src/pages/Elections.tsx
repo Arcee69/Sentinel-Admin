@@ -20,10 +20,12 @@ import { Input, Select } from "../components/ui/Field";
 import { TabPanel, TabsList } from "../components/ui/Tabs";
 import { ErrorState, LoadingRows } from "../components/ui/AsyncState";
 import {
-  useCandidates,
-  useContests,
+  allContestsQuery,
+  useAllContests,
+  useCandidatesPage,
+  useContestsPage,
+  useDistrictCount,
   useElectionCycles,
-  useElectoralDistricts,
   useMilestones,
   useParties,
   useReferenceSources,
@@ -31,7 +33,12 @@ import {
 import { useUnitNames } from "../hooks/useUnitNames";
 import { useNow } from "../hooks/useNow";
 import { formatDate, humanize, parseApiDate } from "../lib/format";
-import { electionsApi, type OfficeType, type ReferenceSource } from "../services/elections";
+import {
+  electionsApi,
+  type Contest,
+  type OfficeType,
+  type ReferenceSource,
+} from "../services/elections";
 import { errorMessage } from "../services/errors";
 import { cn } from "../lib/cn";
 
@@ -87,6 +94,71 @@ const fmtDate = (value: string | null | undefined) => (value ? formatDate(value)
 
 const fmtNum = (n: number) => n.toLocaleString("en-US");
 
+/**
+ * Race names read "<year> <district> <office> election". The district is the
+ * row's scope; reading it from the name avoids paging through every district
+ * (the districts list can't be filtered or fetched by a set of IDs).
+ */
+function scopeOf(c: Pick<Contest, "name" | "office_type">) {
+  const rest = c.name.match(/^\d{4}\s+(.+)\s+election$/i)?.[1];
+  const office = ` ${c.office_type.replace(/_/g, " ")}`;
+  if (!rest || !rest.toLowerCase().endsWith(office)) return null;
+  return rest.slice(0, -office.length).trim() || null;
+}
+
+function toRace(c: Contest) {
+  return {
+    id: c.id,
+    title: c.name,
+    type: { name: humanize(c.office_type), tier: tierOf(c.office_type) },
+    scope: scopeOf(c),
+    date: c.election_date,
+    status: c.status,
+    registeredVoters: c.registered_count,
+    incumbent: c.incumbent_name,
+  };
+}
+
+type Race = ReturnType<typeof toRace>;
+
+function Pager({
+  page,
+  pageCount,
+  onPage,
+  className,
+}: {
+  page: number;
+  pageCount: number;
+  onPage: (page: number) => void;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between border-t border-border text-xs text-muted-foreground",
+        className,
+      )}
+    >
+      <span>
+        Page {fmtNum(page + 1)} of {fmtNum(pageCount)}
+      </span>
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" disabled={page === 0} onClick={() => onPage(page - 1)}>
+          Previous
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={page + 1 >= pageCount}
+          onClick={() => onPage(page + 1)}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function Elections() {
   const queryClient = useQueryClient();
   const unitName = useUnitNames();
@@ -98,22 +170,31 @@ export default function Elections() {
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [candidatePage, setCandidatePage] = useState(0);
+  // Set once the filter bar is used: that is when the full race list is worth fetching.
+  const [wantsAllRaces, setWantsAllRaces] = useState(false);
 
+  const q = query.trim().toLowerCase();
+  const filtering = q !== "" || tier !== "all" || state !== "all" || status !== "all";
+
+  // Browsing costs one request per page. The contests list has no search or
+  // filters, so those (and the export) work on the full list, fetched on demand.
+  const racesPageQuery = useContestsPage(page + 1, PAGE_SIZE, !filtering);
+  const allRacesQuery = useAllContests(wantsAllRaces || filtering);
   const cyclesQuery = useElectionCycles();
   const cycleIds = useMemo(() => (cyclesQuery.data ?? []).map((c) => c.id), [cyclesQuery.data]);
-  const contestsQuery = useContests(cycleIds);
   const milestonesQuery = useMilestones(cycleIds);
-  const districtsQuery = useElectoralDistricts();
-  const partiesQuery = useParties();
+  const districtCountQuery = useDistrictCount();
   const sourcesQuery = useReferenceSources();
-  const contestIds = useMemo(
-    () => (contestsQuery.data ?? []).map((c) => c.id),
-    [contestsQuery.data],
-  );
-  const candidatesQuery = useCandidates(contestIds);
+  // Candidates and parties load only on their own tabs.
+  const candidatesQuery = useCandidatesPage(candidatePage + 1, PAGE_SIZE, tab === "candidates");
+  const partiesQuery = useParties(tab === "parties");
 
-  const PARTIES = useMemo(() => partiesQuery.data ?? [], [partiesQuery.data]);
-  const CANDIDATES = candidatesQuery.data ?? [];
+  const PARTIES = partiesQuery.data ?? [];
+  const CANDIDATES = candidatesQuery.data?.data ?? [];
+  const candidateTotal = candidatesQuery.data?.meta.total;
+  const candidatePageCount = Math.max(1, Number(candidatesQuery.data?.meta.last_page ?? 1));
   const SOURCES = sourcesQuery.data ?? [];
   const MILESTONES = useMemo(
     () =>
@@ -121,20 +202,14 @@ export default function Elections() {
     [milestonesQuery.data],
   );
 
-  // Matrix rows: each contest with its district as the scope.
-  const RACES = useMemo(() => {
-    const districts = new Map((districtsQuery.data ?? []).map((d) => [d.id, d]));
-    return (contestsQuery.data ?? []).map((c) => ({
-      id: c.id,
-      title: c.name,
-      type: { name: humanize(c.office_type), tier: tierOf(c.office_type) },
-      scope: districts.get(c.electoral_district_id)?.name ?? null,
-      date: c.election_date,
-      status: c.status,
-      registeredVoters: c.registered_count,
-      incumbent: c.incumbent_name,
-    }));
-  }, [contestsQuery.data, districtsQuery.data]);
+  const pageRaces = useMemo(
+    () => (racesPageQuery.data?.data ?? []).map(toRace),
+    [racesPageQuery.data],
+  );
+  const allRaces = useMemo(() => allRacesQuery.data?.map(toRace), [allRacesQuery.data]);
+  /** The races known right now: every race once the full list is in, else this page. */
+  const RACES = allRaces ?? pageRaces;
+  const raceTotal = allRaces?.length ?? racesPageQuery.data?.meta.total;
 
   const states = useMemo(
     () => Array.from(new Set(RACES.map((r) => r.scope).filter(Boolean) as string[])).sort(),
@@ -142,9 +217,8 @@ export default function Elections() {
   );
   const statuses = useMemo(() => Array.from(new Set(RACES.map((r) => r.status))).sort(), [RACES]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return RACES.filter((r) => {
+  const matches = useMemo(
+    () => (r: Race) => {
       if (tier !== "all" && r.type.tier !== tier) return false;
       if (state !== "all" && r.scope !== state) return false;
       if (status !== "all" && r.status !== status) return false;
@@ -152,13 +226,24 @@ export default function Elections() {
         return false;
       }
       return true;
-    });
-  }, [RACES, query, tier, state, status]);
+    },
+    [q, tier, state, status],
+  );
+  const filtered = useMemo(
+    () => (filtering ? (allRaces ?? []).filter(matches) : []),
+    [filtering, allRaces, matches],
+  );
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageCount = filtering
+    ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+    : Math.max(1, Number(racesPageQuery.data?.meta.last_page ?? 1));
   // Clamp so deleting filters can never strand you past the last page.
   const safePage = Math.min(page, pageCount - 1);
-  const rows = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+  const rows = filtering
+    ? filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)
+    : pageRaces;
+  // No count while the full list is still loading, rather than a misleading 0.
+  const raceCount = !filtering ? raceTotal : allRaces ? filtered.length : undefined;
 
   const sourced = RACES.filter((r) => r.registeredVoters != null);
   const totalVoters = sourced.reduce((t, r) => t + (r.registeredVoters ?? 0), 0);
@@ -196,33 +281,43 @@ export default function Elections() {
     }
   }
 
-  function exportCsv() {
-    const header = ["Race", "Type", "Tier", "Scope", "Date", "Status", "Registered voters", "Incumbent"];
-    const body = filtered.map((r) => [
-      r.title,
-      r.type.name,
-      r.type.tier,
-      r.scope ?? "",
-      r.date ?? "",
-      r.status,
-      r.registeredVoters == null ? "" : String(r.registeredVoters),
-      r.incumbent ?? "",
-    ]);
-    const csv = [header, ...body]
-      .map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      // The export covers every matching race, not just the page on screen.
+      const all = (await queryClient.fetchQuery(allContestsQuery)).map(toRace);
+      const header = ["Race", "Type", "Tier", "Scope", "Date", "Status", "Registered voters", "Incumbent"];
+      const body = all.filter(matches).map((r) => [
+        r.title,
+        r.type.name,
+        r.type.tier,
+        r.scope ?? "",
+        r.date ?? "",
+        r.status,
+        r.registeredVoters == null ? "" : String(r.registeredVoters),
+        r.incumbent ?? "",
+      ]);
+      const csv = [header, ...body]
+        .map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
 
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `smhp-election-matrix-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Exported ${body.length} races`);
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `smhp-election-matrix-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${body.length} races`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setExporting(false);
+    }
   }
 
-  const matrixLoading = cyclesQuery.isLoading || contestsQuery.isLoading;
-  const matrixError = cyclesQuery.error ?? contestsQuery.error;
+  const racesQuery = filtering ? allRacesQuery : racesPageQuery;
+  const matrixLoading = racesQuery.isLoading;
+  const matrixError = racesQuery.error;
 
   return (
     <>
@@ -236,9 +331,9 @@ export default function Elections() {
               <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
               Refresh
             </Button>
-            <Button size="sm" variant="primary" onClick={exportCsv}>
+            <Button size="sm" variant="primary" onClick={exportCsv} disabled={exporting}>
               <Download className="h-3.5 w-3.5" />
-              Export CSV
+              {exporting ? "Exporting…" : "Export CSV"}
             </Button>
           </div>
         }
@@ -247,15 +342,17 @@ export default function Elections() {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Races tracked"
-          value={contestsQuery.data ? fmtNum(RACES.length) : "—"}
-          caption={`${(districtsQuery.data ?? []).length} electoral districts`}
+          value={raceTotal != null ? fmtNum(raceTotal) : "—"}
+          caption={`${fmtNum(districtCountQuery.data ?? 0)} electoral districts`}
           tone="primary"
           icon={<BarChart3 className="h-4 w-4" />}
         />
         <StatCard
           label="Registered voters"
           value={sourced.length ? `${(totalVoters / 1_000_000).toFixed(1)}M` : "—"}
-          caption={sourced.length ? "Across all matrix rows" : "Not yet sourced"}
+          caption={
+            !sourced.length ? "Not yet sourced" : allRaces ? "Across all matrix rows" : "Races on this page"
+          }
           tone="accent"
           icon={<UsersRound className="h-4 w-4" />}
         />
@@ -282,11 +379,14 @@ export default function Elections() {
       {/* Master Matrix */}
       <TabPanel value="matrix" active={tab === "matrix"}>
         <Panel
-          title={`Races (${filtered.length})`}
+          title={raceCount != null ? `Races (${fmtNum(raceCount)})` : "Races"}
           subtitle="Filter by tier, state and lifecycle status"
           bodyClassName="p-0"
           action={
-            <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="flex flex-wrap items-center gap-2"
+              onFocusCapture={() => setWantsAllRaces(true)}
+            >
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -343,13 +443,15 @@ export default function Elections() {
           {matrixLoading ? (
             <LoadingRows rows={5} />
           ) : matrixError ? (
-            <ErrorState
-              error={matrixError}
-              onRetry={() => (cyclesQuery.isError ? cyclesQuery.refetch() : contestsQuery.refetch())}
-            />
+            <ErrorState error={matrixError} onRetry={() => racesQuery.refetch()} />
           ) : (
             <>
-              <div className="overflow-x-auto">
+              <div
+                className={cn(
+                  "overflow-x-auto transition-opacity",
+                  !filtering && racesPageQuery.isPlaceholderData && "opacity-60",
+                )}
+              >
                 <table className="w-full min-w-190 text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -378,7 +480,7 @@ export default function Elections() {
                           )}
                         </td>
                         <td className="px-4 py-2.5 text-xs text-muted-foreground">{r.type.name}</td>
-                        <td className="px-4 py-2.5 text-xs">{r.scope ?? "National"}</td>
+                        <td className="px-4 py-2.5 text-xs">{r.scope ?? "—"}</td>
                         <td className="px-4 py-2.5 font-mono text-xs">{fmtDate(r.date)}</td>
                         <td className="px-4 py-2.5">
                           <span
@@ -410,29 +512,7 @@ export default function Elections() {
                 </table>
               </div>
 
-              <div className="flex items-center justify-between border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
-                <span>
-                  Page {safePage + 1} of {pageCount}
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={safePage === 0}
-                    onClick={() => setPage((p) => p - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={safePage + 1 >= pageCount}
-                    onClick={() => setPage((p) => p + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
+              <Pager page={safePage} pageCount={pageCount} onPage={setPage} className="px-4 py-2.5" />
             </>
           )}
         </Panel>
@@ -441,49 +521,62 @@ export default function Elections() {
       {/* Candidates */}
       <TabPanel value="candidates" active={tab === "candidates"}>
         <Panel
-          title={`Candidates (${CANDIDATES.length})`}
+          title={candidateTotal != null ? `Candidates (${fmtNum(candidateTotal)})` : "Candidates"}
           subtitle="Declared aspirants and confirmed nominees"
         >
-          {candidatesQuery.isLoading || matrixLoading ? (
+          {candidatesQuery.isLoading ? (
             <LoadingRows rows={3} padded={false} />
           ) : candidatesQuery.isError ? (
             <ErrorState error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />
           ) : CANDIDATES.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">No candidates recorded yet.</p>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {CANDIDATES.map((c) => {
-                const party = PARTIES.find((p) => p.id === c.election_party_id);
-                const office = RACES.find((r) => r.id === c.contest_id)?.title;
-                const color = party ? partyColor(party.id) : undefined;
-                const homeState = unitName(c.home_state_id);
-                return (
-                  <div
-                    key={c.id}
-                    className="rounded-lg border border-border bg-secondary/25 p-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{c.name}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {office ?? "Office TBC"}
-                          {homeState ? ` · ${homeState}` : ""}
-                          {c.age_at_election ? ` · ${c.age_at_election}` : ""}
-                        </p>
+            <>
+              <div
+                className={cn(
+                  "grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3",
+                  candidatesQuery.isPlaceholderData && "opacity-60",
+                )}
+              >
+                {CANDIDATES.map((c) => {
+                  const party = c.party;
+                  const office = c.contest?.name;
+                  const color = party ? partyColor(party.id) : undefined;
+                  const homeState = unitName(c.home_state_id);
+                  return (
+                    <div
+                      key={c.id}
+                      className="rounded-lg border border-border bg-secondary/25 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">{c.name}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {office ?? "Office TBC"}
+                            {homeState ? ` · ${homeState}` : ""}
+                            {c.age_at_election ? ` · ${c.age_at_election}` : ""}
+                          </p>
+                        </div>
+                        {party && (
+                          <span
+                            className="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-bold"
+                            style={{ backgroundColor: `${color}22`, color }}
+                          >
+                            {party.official_code}
+                          </span>
+                        )}
                       </div>
-                      {party && (
-                        <span
-                          className="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-bold"
-                          style={{ backgroundColor: `${color}22`, color }}
-                        >
-                          {party.official_code}
-                        </span>
-                      )}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+              <Pager
+                page={candidatePage}
+                pageCount={candidatePageCount}
+                onPage={setCandidatePage}
+                className="mt-4 pt-3"
+              />
+            </>
           )}
         </Panel>
       </TabPanel>
@@ -525,9 +618,6 @@ export default function Elections() {
                     <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
                       <UsersRound className="h-3 w-3" />
                       {p.coverage === "national" ? "National coverage" : "Regional platform"}
-                      <span className="ml-auto">
-                        {CANDIDATES.filter((c) => c.election_party_id === p.id).length} candidate(s)
-                      </span>
                     </div>
                   </div>
                 );

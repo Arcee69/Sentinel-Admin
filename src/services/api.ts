@@ -113,6 +113,7 @@ export const API = {
     milestones: (cycle: string) => `/election-cycles/${cycle}/milestones`,
     contests: "/contests",
     candidates: (contest: string) => `/contests/${contest}/candidates`,
+    contestCandidates: "/contest-candidates",
     parties: "/election-parties",
     electoralDistricts: "/electoral-districts",
     referenceSources: "/reference-sources",

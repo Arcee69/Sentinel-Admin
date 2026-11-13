@@ -1,6 +1,6 @@
 import apiInstance from "./instance";
 import { API } from "./api";
-import { getAllPages } from "./requests";
+import { getAllPages, getList } from "./requests";
 
 export interface ElectionCycle {
   id: string;
@@ -34,6 +34,7 @@ export interface Contest {
   incumbent_name: string | null;
   registered_count: number | null;
   status: string;
+  candidates_count?: number;
 }
 
 export interface ElectoralDistrict {
@@ -67,6 +68,9 @@ export interface ContestCandidate {
   name: string;
   age_at_election: number | null;
   home_state_id: string | null;
+  /** Embedded by the cross-contest candidate list. */
+  contest?: Pick<Contest, "id" | "name" | "office_type" | "status">;
+  party?: Pick<ElectionParty, "id" | "official_code" | "name"> | null;
 }
 
 export interface ElectionMilestone {
@@ -94,10 +98,19 @@ export const electionsApi = {
   cycles: () => getAllPages<ElectionCycle>(API.catalog.electionCycles),
   contests: (cycleId: string) =>
     getAllPages<Contest>(API.catalog.contests, { election_cycle_id: cycleId }),
-  candidates: (contestId: string) => getAllPages<ContestCandidate>(API.catalog.candidates(contestId)),
+  /** One page of races across every cycle; `meta.total` is the race count. */
+  contestsPage: (page: number, perPage: number) =>
+    getList<Contest>(API.catalog.contests, { page, per_page: perPage }),
+  /** One page of candidates across every race, each with its race and party. */
+  candidatesPage: (page: number, perPage: number) =>
+    getList<ContestCandidate>(API.catalog.contestCandidates, { page, per_page: perPage }),
   milestones: (cycleId: string) => getAllPages<ElectionMilestone>(API.catalog.milestones(cycleId)),
   parties: () => getAllPages<ElectionParty>(API.catalog.parties),
-  districts: () => getAllPages<ElectoralDistrict>(API.catalog.electoralDistricts),
+  /** Only the total is used; the list itself can't be filtered or resized. */
+  districtCount: async () => {
+    const res = await getList<ElectoralDistrict>(API.catalog.electoralDistricts);
+    return Number(res.meta?.total ?? res.data.length);
+  },
   sources: () => getAllPages<ReferenceSource>(API.catalog.referenceSources),
   /** The original file; a binary response, not the JSON envelope. */
   downloadSource: async (sourceId: string) => {
