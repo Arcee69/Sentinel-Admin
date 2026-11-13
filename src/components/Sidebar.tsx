@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
-import { ChevronLeft, ShieldCheck, X } from "lucide-react";
+import { ChevronLeft, X } from "lucide-react";
+import brandMark from "../assets/svg/mark-reverse.svg";
 import { NAV_ITEMS } from "../lib/nav";
 import { cn } from "../lib/cn";
 
@@ -33,9 +34,11 @@ export function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile
       >
         {/* Brand */}
         <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4">
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-primary shadow-glow-primary">
-            <ShieldCheck className="h-5 w-5 text-primary-foreground" />
-          </div>
+          <img
+            src={brandMark}
+            alt="SMHP Sentinel"
+            className="h-9 w-9 shrink-0 object-contain"
+          />
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] font-bold leading-tight tracking-tight">

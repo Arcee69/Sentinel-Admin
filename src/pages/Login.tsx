@@ -8,10 +8,10 @@ import {
   Loader2,
   Lock,
   Mail,
-  ShieldCheck,
   Wifi,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import brandMark from "../assets/svg/mark-reverse.svg";
 import { Button } from "../components/ui/Button";
 import { Input, Label } from "../components/ui/Field";
 import { errorMessage, toApiError, type FieldErrors } from "../services/errors";
@@ -69,9 +69,7 @@ export default function Login() {
       <div className="hidden flex-col justify-between rounded-2xl border border-border bg-gradient-surface p-8 lg:flex">
         <div>
           <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-lg bg-gradient-primary shadow-glow-primary">
-              <ShieldCheck className="h-6 w-6 text-primary-foreground" />
-            </div>
+            <img src={brandMark} alt="" className="h-11 w-11 object-contain" />
             <div>
               <div className="text-lg font-bold tracking-tight">SMHP Sentinel</div>
               <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
@@ -132,9 +130,7 @@ export default function Login() {
       {/* Form card */}
       <div className="rounded-2xl border border-border bg-card/80 p-6 shadow-elevated backdrop-blur-xl sm:p-8">
         <div className="mb-6 flex items-center gap-2.5 lg:hidden">
-          <div className="grid h-9 w-9 place-items-center rounded-md bg-gradient-primary shadow-glow-primary">
-            <ShieldCheck className="h-5 w-5 text-primary-foreground" />
-          </div>
+          <img src={brandMark} alt="" className="h-9 w-9 object-contain" />
           <div>
             <div className="text-sm font-bold">SMHP Sentinel</div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
