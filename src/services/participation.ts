@@ -19,7 +19,7 @@ export interface ParticipationUnit {
 }
 
 export interface ParticipationGeography {
-  polling_occasion_id: string;
+  polling_occasion_id: string | null;
   mode: ParticipationMode;
   parent_unit_id: string | null;
   as_of: string;
@@ -128,13 +128,17 @@ export type QualityCaseNextStatus = "reviewing" | "confirmed" | "dismissed";
 const ENTRY_PAGE_CAP = 20;
 
 export const participationApi = {
+  /**
+   * `polling_occasion_id` is optional on both aggregates: without one the API
+   * answers with register totals only and null observation counts.
+   */
   summary: (
     campaignId: string,
-    query: { polling_occasion_id: string; mode: ParticipationMode; geographic_unit_id?: string },
+    query: { polling_occasion_id?: string; mode: ParticipationMode; geographic_unit_id?: string },
   ) => getMethod<ParticipationSummary>(API.campaign.participationSummary(campaignId), query),
   geography: (
     campaignId: string,
-    query: { polling_occasion_id: string; mode: ParticipationMode; parent_unit_id?: string },
+    query: { polling_occasion_id?: string; mode: ParticipationMode; parent_unit_id?: string },
   ) => getMethod<ParticipationGeography>(API.campaign.participationGeography(campaignId), query),
   ballots: (campaignId: string, query: { contest_round_id: string; mode: ParticipationMode }) =>
     getMethod<BallotsSummary>(API.campaign.ballotsSummary(campaignId), query),

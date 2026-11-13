@@ -138,15 +138,17 @@ export function toLevelSummary(input: {
 }): LevelSummary {
   const s = input.stats ?? { ...emptyStats(), registered: NaN };
   const registered = input.registeredTotal ?? s.registered;
-  const coveredRegistered = input.participating.registered_denominator;
+  // The server sends null counts while there is no occasion to observe; NaN
+  // keeps them out of the arithmetic and renders as "—".
+  const coveredRegistered = input.participating.registered_denominator ?? NaN;
   const voterCoverage =
-    Number.isFinite(registered) && registered > 0
+    Number.isFinite(coveredRegistered) && Number.isFinite(registered) && registered > 0
       ? (coveredRegistered / registered) * 100
       : input.participating.coverage_percent;
   const totalReports = s.verified + s.unverified;
   const valid = input.valid ?? NaN;
   const invalid = input.invalid ?? NaN;
-  const participatingCount = input.participating.count;
+  const participatingCount = input.participating.count ?? NaN;
   const observed = input.participating.rate_percent;
   const historicalTurnout = input.historicalTurnout ?? null;
 
@@ -160,7 +162,7 @@ export function toLevelSummary(input: {
     coveredPus: input.participating.reporting_places,
     registered,
     coveredRegistered,
-    accredited: input.accredited.count,
+    accredited: input.accredited.count ?? NaN,
     participating: participatingCount,
     valid,
     invalid,

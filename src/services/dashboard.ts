@@ -11,8 +11,9 @@ interface Provenance {
 export type ParticipationMode = "provisional" | "verified";
 
 export interface ParticipationMetric {
-  count: number;
-  registered_denominator: number;
+  /** Null while no polling occasion is published and nothing can be observed. */
+  count: number | null;
+  registered_denominator: number | null;
   reporting_places: number;
   excluded_conflicts: number;
   rate_percent: number | null;
@@ -21,8 +22,9 @@ export interface ParticipationMetric {
 
 export interface ParticipationSummary extends Provenance {
   organization_id: string;
-  polling_occasion_id: string;
-  register_version_id: string;
+  /** Null until an occasion is published; the summary then carries register totals only. */
+  polling_occasion_id: string | null;
+  register_version_id: string | null;
   geographic_unit_id: string | null;
   mode: ParticipationMode;
   eligible_polling_places: number;

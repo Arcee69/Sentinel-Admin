@@ -143,11 +143,13 @@ export function useNationalSummary() {
   const { stats } = useParticipationStats();
   const campaignId = apiCampaign?.id;
 
+  // Before an occasion is published the API still returns register totals, so
+  // wait for the setup lookup to settle rather than for an occasion to exist.
   const summary = useQuery({
     queryKey: ["campaign", campaignId, "participation-summary", occasion?.id, mode],
     queryFn: async () =>
-      (await participationApi.summary(campaignId!, { polling_occasion_id: occasion!.id, mode })).data,
-    enabled: !!campaignId && !!occasion,
+      (await participationApi.summary(campaignId!, { polling_occasion_id: occasion?.id, mode })).data,
+    enabled: !!campaignId && !setupLoading && !setupError,
     refetchInterval: LIVE_REFRESH,
   });
 
@@ -209,6 +211,10 @@ export function useNationalSummary() {
   };
 }
 
+/** Largest register first; a unit with no figure at all keeps its server order at the end. */
+const sortWeight = (r: LevelSummary) =>
+  Number.isFinite(r.registered) ? r.registered : Number.isFinite(r.coveredRegistered) ? r.coveredRegistered : 0;
+
 /**
  * One row per child of `parentUnitId` (the country for states, a state for
  * LGAs, an LGA for wards), from the server's per-unit aggregates.
@@ -218,21 +224,23 @@ export function useLevelRows(
   context: { state?: string; lga?: string } = {},
 ) {
   const { apiCampaign } = useFilters();
-  const { occasion, version, mode } = useParticipationSetup();
+  const { occasion, version, mode, isLoading: setupLoading, error: setupError } =
+    useParticipationSetup();
   const { stats } = useParticipationStats();
   const campaignId = apiCampaign?.id;
 
+  // Like the national summary, this runs without an occasion (register totals only).
   const query = useQuery({
     queryKey: ["campaign", campaignId, "participation-geography", occasion?.id, mode, parentUnitId],
     queryFn: async () =>
       (
         await participationApi.geography(campaignId!, {
-          polling_occasion_id: occasion!.id,
+          polling_occasion_id: occasion?.id,
           mode,
           parent_unit_id: parentUnitId!,
         })
       ).data,
-    enabled: !!campaignId && !!occasion && !!parentUnitId,
+    enabled: !!campaignId && !setupLoading && !setupError && !!parentUnitId,
     refetchInterval: LIVE_REFRESH,
   });
 
@@ -254,15 +262,16 @@ export function useLevelRows(
             registerPublished: version?.status === "published",
           }),
         )
-        .sort(
-          (a, b) =>
-            (Number.isFinite(b.registered) ? b.registered : b.coveredRegistered) -
-            (Number.isFinite(a.registered) ? a.registered : a.coveredRegistered),
-        ),
+        .sort((a, b) => sortWeight(b) - sortWeight(a)),
     [query.data, stats, version, context.state, context.lga],
   );
 
-  return { rows, isLoading: query.isLoading, error: query.error, refetch: query.refetch };
+  return {
+    rows,
+    isLoading: setupLoading || query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
+  };
 }
 
 /** One polling unit: its register baseline, place in the hierarchy and reports. */
