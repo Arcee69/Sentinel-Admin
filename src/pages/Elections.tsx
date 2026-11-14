@@ -22,7 +22,7 @@ import { ErrorState, LoadingRows } from "../components/ui/AsyncState";
 import {
   allContestsQuery,
   useAllContests,
-  useCandidatesPage,
+  useContestCandidates,
   useContestsPage,
   useDistrictCount,
   useElectionCycles,
@@ -70,7 +70,8 @@ const TABS = [
 
 type TabValue = (typeof TABS)[number]["value"];
 
-const PAGE_SIZE = 12;
+/** The contests list serves 25 races a page whatever is asked for; the table matches it. */
+const PAGE_SIZE = 25;
 
 /** Party colours aren't in the catalog; a stable pick per party keeps badges readable. */
 const PARTY_PALETTE = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899"];
@@ -171,9 +172,8 @@ export default function Elections() {
   const [page, setPage] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [candidatePage, setCandidatePage] = useState(0);
-  // Set once the filter bar is used: that is when the full race list is worth fetching.
-  const [wantsAllRaces, setWantsAllRaces] = useState(false);
+  // The race whose candidates the Candidates tab lists; the first race shown until one is picked.
+  const [pickedRace, setPickedRace] = useState<Race | null>(null);
 
   const q = query.trim().toLowerCase();
   const filtering = q !== "" || tier !== "all" || state !== "all" || status !== "all";
@@ -181,20 +181,16 @@ export default function Elections() {
   // Browsing costs one request per page. The contests list has no search or
   // filters, so those (and the export) work on the full list, fetched on demand.
   const racesPageQuery = useContestsPage(page + 1, PAGE_SIZE, !filtering);
-  const allRacesQuery = useAllContests(wantsAllRaces || filtering);
+  const allRacesQuery = useAllContests(filtering);
   const cyclesQuery = useElectionCycles();
   const cycleIds = useMemo(() => (cyclesQuery.data ?? []).map((c) => c.id), [cyclesQuery.data]);
   const milestonesQuery = useMilestones(cycleIds);
   const districtCountQuery = useDistrictCount();
   const sourcesQuery = useReferenceSources();
-  // Candidates and parties load only on their own tabs.
-  const candidatesQuery = useCandidatesPage(candidatePage + 1, PAGE_SIZE, tab === "candidates");
-  const partiesQuery = useParties(tab === "parties");
+  // Parties load only on the tabs that show them (candidate cards carry a party badge).
+  const partiesQuery = useParties(tab === "candidates" || tab === "parties");
 
   const PARTIES = partiesQuery.data ?? [];
-  const CANDIDATES = candidatesQuery.data?.data ?? [];
-  const candidateTotal = candidatesQuery.data?.meta.total;
-  const candidatePageCount = Math.max(1, Number(candidatesQuery.data?.meta.last_page ?? 1));
   const SOURCES = sourcesQuery.data ?? [];
   const MILESTONES = useMemo(
     () =>
@@ -245,6 +241,15 @@ export default function Elections() {
   // No count while the full list is still loading, rather than a misleading 0.
   const raceCount = !filtering ? raceTotal : allRaces ? filtered.length : undefined;
 
+  // Candidates are listed per race: one request, for the selected race only,
+  // and only once the Candidates tab is open.
+  const candidateRace = pickedRace ?? rows[0] ?? pageRaces[0];
+  const candidatesQuery = useContestCandidates(candidateRace?.id, tab === "candidates");
+  const CANDIDATES = candidatesQuery.data ?? [];
+  /** Races offered in the Candidates tab picker: the ones on the matrix page, plus the picked one. */
+  const raceOptions =
+    candidateRace && !rows.some((r) => r.id === candidateRace.id) ? [candidateRace, ...rows] : rows;
+
   const sourced = RACES.filter((r) => r.registeredVoters != null);
   const totalVoters = sourced.reduce((t, r) => t + (r.registeredVoters ?? 0), 0);
   const isPast = (iso: string) => (parseApiDate(iso)?.getTime() ?? 0) < now;
@@ -252,6 +257,11 @@ export default function Elections() {
   const verifiedPct = SOURCES.length
     ? Math.round((SOURCES.filter((s) => s.status === "reviewed").length / SOURCES.length) * 100)
     : 0;
+
+  function showCandidates(race: Race) {
+    setPickedRace(race);
+    setTab("candidates");
+  }
 
   function resetPage<T>(setter: (v: T) => void) {
     return (v: T) => {
@@ -383,10 +393,7 @@ export default function Elections() {
           subtitle="Filter by tier, state and lifecycle status"
           bodyClassName="p-0"
           action={
-            <div
-              className="flex flex-wrap items-center gap-2"
-              onFocusCapture={() => setWantsAllRaces(true)}
-            >
+            <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -467,11 +474,18 @@ export default function Elections() {
                     {rows.map((r) => (
                       <tr
                         key={r.id}
-                        className="border-b border-border/60 transition-colors last:border-0 hover:bg-secondary/30"
+                        onClick={() => showCandidates(r)}
+                        title="View candidates"
+                        className="cursor-pointer border-b border-border/60 transition-colors last:border-0 hover:bg-secondary/30"
                       >
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-2">
-                            <span className="font-medium">{r.title}</span>
+                            <button
+                              type="button"
+                              className="cursor-pointer text-left font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            >
+                              {r.title}
+                            </button>
                           </div>
                           {r.incumbent && (
                             <p className="text-[11px] text-muted-foreground">
@@ -521,62 +535,70 @@ export default function Elections() {
       {/* Candidates */}
       <TabPanel value="candidates" active={tab === "candidates"}>
         <Panel
-          title={candidateTotal != null ? `Candidates (${fmtNum(candidateTotal)})` : "Candidates"}
+          title={candidatesQuery.data ? `Candidates (${CANDIDATES.length})` : "Candidates"}
           subtitle="Declared aspirants and confirmed nominees"
+          action={
+            raceOptions.length > 0 && (
+              <Select
+                value={candidateRace?.id ?? ""}
+                aria-label="Race"
+                onChange={(e) =>
+                  setPickedRace(raceOptions.find((r) => r.id === e.target.value) ?? null)
+                }
+                className="h-8 w-72 max-w-full text-xs"
+              >
+                {raceOptions.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.title}
+                  </option>
+                ))}
+              </Select>
+            )
+          }
         >
-          {candidatesQuery.isLoading ? (
+          {candidatesQuery.isLoading || (!candidateRace && matrixLoading) ? (
             <LoadingRows rows={3} padded={false} />
+          ) : !candidateRace && matrixError ? (
+            // Candidates hang off a race; without the races there is nothing to list.
+            <ErrorState error={matrixError} onRetry={() => racesQuery.refetch()} />
           ) : candidatesQuery.isError ? (
             <ErrorState error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />
           ) : CANDIDATES.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">No candidates recorded yet.</p>
           ) : (
-            <>
-              <div
-                className={cn(
-                  "grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3",
-                  candidatesQuery.isPlaceholderData && "opacity-60",
-                )}
-              >
-                {CANDIDATES.map((c) => {
-                  const party = c.party;
-                  const office = c.contest?.name;
-                  const color = party ? partyColor(party.id) : undefined;
-                  const homeState = unitName(c.home_state_id);
-                  return (
-                    <div
-                      key={c.id}
-                      className="rounded-lg border border-border bg-secondary/25 p-3"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">{c.name}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {office ?? "Office TBC"}
-                            {homeState ? ` · ${homeState}` : ""}
-                            {c.age_at_election ? ` · ${c.age_at_election}` : ""}
-                          </p>
-                        </div>
-                        {party && (
-                          <span
-                            className="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-bold"
-                            style={{ backgroundColor: `${color}22`, color }}
-                          >
-                            {party.official_code}
-                          </span>
-                        )}
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {CANDIDATES.map((c) => {
+                const party = PARTIES.find((p) => p.id === c.election_party_id);
+                const office = candidateRace?.title;
+                const color = party ? partyColor(party.id) : undefined;
+                const homeState = unitName(c.home_state_id);
+                return (
+                  <div
+                    key={c.id}
+                    className="rounded-lg border border-border bg-secondary/25 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{c.name}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {office ?? "Office TBC"}
+                          {homeState ? ` · ${homeState}` : ""}
+                          {c.age_at_election ? ` · ${c.age_at_election}` : ""}
+                        </p>
                       </div>
+                      {party && (
+                        <span
+                          className="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-bold"
+                          style={{ backgroundColor: `${color}22`, color }}
+                        >
+                          {party.official_code}
+                        </span>
+                      )}
                     </div>
-                  );
-                })}
-              </div>
-              <Pager
-                page={candidatePage}
-                pageCount={candidatePageCount}
-                onPage={setCandidatePage}
-                className="mt-4 pt-3"
-              />
-            </>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </Panel>
       </TabPanel>

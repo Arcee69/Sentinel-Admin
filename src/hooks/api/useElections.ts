@@ -4,7 +4,11 @@ import { electionsApi, type Contest } from "../../services/elections";
 /** The catalog changes only when a record is sourced and published. */
 const CATALOG_STALE = 10 * 60_000;
 
-/** Largest page the contests list serves. */
+/**
+ * Page size asked for when fetching every race. The API currently serves 25
+ * regardless; the loop follows the `last_page` it reports, so it needs fewer
+ * requests as soon as larger pages are honoured.
+ */
 const CONTESTS_MAX_PAGE = 100;
 /** Pages of the full race list requested at once. */
 const ALL_CONTESTS_CONCURRENCY = 3;
@@ -16,8 +20,7 @@ export const electionKeys = {
     ["catalog", "contests-page", perPage, page] as const,
   allContests: ["catalog", "contests-all"] as const,
   milestones: (cycleIds: string[]) => ["catalog", "milestones", cycleIds] as const,
-  candidatesPage: (page: number, perPage: number) =>
-    ["catalog", "candidates-page", perPage, page] as const,
+  candidates: (contestId: string) => ["catalog", "candidates", contestId] as const,
   parties: ["catalog", "election-parties"] as const,
   districtCount: ["catalog", "electoral-districts", "count"] as const,
   sources: ["catalog", "reference-sources"] as const,
@@ -53,8 +56,8 @@ export function useContestsPage(page: number, perPage: number, enabled = true) {
 
 /**
  * Every race. The contests list has no search or filters, so searching,
- * filtering and exporting need the whole list; it is fetched in the largest
- * pages the API serves, a few at a time, and only when one of those is used.
+ * filtering and exporting need the whole list; it is fetched a few pages at
+ * a time, and only when one of those is actually used.
  */
 export async function fetchAllContests(): Promise<Contest[]> {
   const first = await electionsApi.contestsPage(1, CONTESTS_MAX_PAGE);
@@ -90,14 +93,13 @@ export function useMilestones(cycleIds: string[]) {
   });
 }
 
-/** One page of candidates across every race, with race and party embedded. */
-export function useCandidatesPage(page: number, perPage: number, enabled = true) {
+/** Candidates are listed per race: one request for the race being viewed. */
+export function useContestCandidates(contestId: string | undefined, enabled = true) {
   return useQuery({
-    queryKey: electionKeys.candidatesPage(page, perPage),
-    queryFn: () => electionsApi.candidatesPage(page, perPage),
-    enabled,
+    queryKey: electionKeys.candidates(contestId ?? ""),
+    queryFn: () => electionsApi.candidates(contestId!),
+    enabled: enabled && !!contestId,
     staleTime: CATALOG_STALE,
-    placeholderData: keepPreviousData,
   });
 }
 

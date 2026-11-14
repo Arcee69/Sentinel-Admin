@@ -68,9 +68,6 @@ export interface ContestCandidate {
   name: string;
   age_at_election: number | null;
   home_state_id: string | null;
-  /** Embedded by the cross-contest candidate list. */
-  contest?: Pick<Contest, "id" | "name" | "office_type" | "status">;
-  party?: Pick<ElectionParty, "id" | "official_code" | "name"> | null;
 }
 
 export interface ElectionMilestone {
@@ -101,9 +98,8 @@ export const electionsApi = {
   /** One page of races across every cycle; `meta.total` is the race count. */
   contestsPage: (page: number, perPage: number) =>
     getList<Contest>(API.catalog.contests, { page, per_page: perPage }),
-  /** One page of candidates across every race, each with its race and party. */
-  candidatesPage: (page: number, perPage: number) =>
-    getList<ContestCandidate>(API.catalog.contestCandidates, { page, per_page: perPage }),
+  /** The candidates of one race (a single page for any real race). */
+  candidates: (contestId: string) => getAllPages<ContestCandidate>(API.catalog.candidates(contestId)),
   milestones: (cycleId: string) => getAllPages<ElectionMilestone>(API.catalog.milestones(cycleId)),
   parties: () => getAllPages<ElectionParty>(API.catalog.parties),
   /** Only the total is used; the list itself can't be filtered or resized. */
