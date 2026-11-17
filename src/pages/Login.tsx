@@ -195,7 +195,7 @@ export default function Login() {
                 type="checkbox"
                 checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
-                className="h-3.5 w-3.5 cursor-pointer accent-[oklch(68%_0.19_245)]"
+                className="h-3.5 w-3.5 cursor-pointer accent-primary"
               />
               Remember this device
             </label>

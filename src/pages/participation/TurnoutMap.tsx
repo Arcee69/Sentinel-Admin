@@ -107,7 +107,7 @@ function Choropleth({
       return `oklch(0.6 0.16 ${hue} / ${0.2 + 0.7 * Math.min(1, Math.abs(value) / 15)})`;
     }
     const t = max === min ? 0.6 : (value - min) / (max - min);
-    return `oklch(0.62 0.15 250 / ${0.18 + 0.72 * t})`;
+    return `oklch(0.64 0.16 43 / ${0.18 + 0.72 * t})`;
   };
 
   const hovered = hover ? rowFor(hover) : undefined;

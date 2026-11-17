@@ -4,16 +4,16 @@ import { LGAS_BY_STATE, type StateActivity } from "../../lib/data";
 import { cn } from "../../lib/cn";
 
 /**
- * Sequential ramp — one hue (245), monotonic dim→bright.
+ * Sequential ramp — one hue (43, brand orange), monotonic dim→bright.
  * Magnitude is encoded as brightness against the dark surface, so the ramp
  * reads in one direction and never as separate categories.
  */
 const RAMP = [
-  "oklch(32% 0.06 245)",
-  "oklch(42% 0.10 245)",
-  "oklch(52% 0.14 245)",
-  "oklch(60% 0.17 245)",
-  "oklch(68% 0.19 245)",
+  "oklch(32% 0.06 43)",
+  "oklch(42% 0.10 43)",
+  "oklch(52% 0.14 43)",
+  "oklch(60% 0.17 43)",
+  "oklch(68% 0.19 43)",
 ];
 
 interface Props {
@@ -89,8 +89,8 @@ export function NigeriaMap({
         >
           <defs>
             <radialGradient id={`${gradId}-glow`} cx="50%" cy="50%" r="60%">
-              <stop offset="0%" stopColor="oklch(68% 0.19 245 / 0.18)" />
-              <stop offset="100%" stopColor="oklch(68% 0.19 245 / 0)" />
+              <stop offset="0%" stopColor="oklch(68% 0.19 43 / 0.18)" />
+              <stop offset="100%" stopColor="oklch(68% 0.19 43 / 0)" />
             </radialGradient>
           </defs>
 

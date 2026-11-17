@@ -3,15 +3,15 @@ import { cn } from "../../lib/cn";
 import { LGAS_BY_STATE, type StateActivity } from "../../lib/data";
 
 /**
- * Sequential ramp — one hue (245), monotonic light→bright for magnitude.
+ * Sequential ramp — one hue (43, brand orange), monotonic light→bright for magnitude.
  * On a dark surface the low end is the dim step, so intensity reads as brightness.
  */
 const RAMP = [
-  "oklch(30% 0.06 245)",
-  "oklch(40% 0.10 245)",
-  "oklch(50% 0.14 245)",
-  "oklch(58% 0.17 245)",
-  "oklch(66% 0.19 245)",
+  "oklch(30% 0.06 43)",
+  "oklch(40% 0.10 43)",
+  "oklch(50% 0.14 43)",
+  "oklch(58% 0.17 43)",
+  "oklch(66% 0.19 43)",
 ];
 
 function stepFor(value: number, min: number, max: number) {
