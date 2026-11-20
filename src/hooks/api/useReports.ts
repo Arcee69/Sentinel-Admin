@@ -1,5 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { reportsApi, saveBlob, type OperationsFormat } from "../../services/reports";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  reportsApi,
+  saveBlob,
+  type ObserverReportsQuery,
+  type OperationsFormat,
+} from "../../services/reports";
 import type { ParticipationMode } from "../../services/participation";
 import { ApiError } from "../../services/errors";
 
@@ -11,6 +16,17 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Export states that are still on their way to `ready` or `failed`. */
 const UNFINISHED = new Set(["queued", "processing", "pending"]);
+
+/** One page of observer reports: a single request per page shown. */
+export function useObserverReports(campaignId: string | undefined, query: ObserverReportsQuery) {
+  return useQuery({
+    queryKey: ["campaign", campaignId, "observer-reports", query],
+    queryFn: () => reportsApi.observerReports(campaignId!, query),
+    enabled: !!campaignId,
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+  });
+}
 
 /** Downloads the operations report for a date window as CSV or PDF. */
 export function useOperationsDownload(campaignId: string | undefined) {

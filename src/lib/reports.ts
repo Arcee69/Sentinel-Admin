@@ -1,6 +1,7 @@
 import type { CampaignAnalytics } from "../services/dashboard";
 import type { IntelligenceSummary } from "../services/intelligence";
-import { isoDay } from "./format";
+import type { BadgeTone } from "../components/ui/Badge";
+import { humanize, isoDay } from "./format";
 
 const DAY_MS = 86_400_000;
 
@@ -82,4 +83,15 @@ export function dailyNetSentiment(summary: IntelligenceSummary | undefined) {
       label: shortDay(day),
       score: Math.round(((d.pos - d.neg) / d.total) * 50 + 50),
     }));
+}
+
+const OBSERVER_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
+  draft: { label: "Draft", tone: "muted" },
+  in_review: { label: "In review", tone: "warning" },
+  reviewed: { label: "Reviewed", tone: "success" },
+};
+
+/** Label and badge tone for an observer report's status. */
+export function observerStatus(status: string): { label: string; tone: BadgeTone } {
+  return OBSERVER_STATUS[status] ?? { label: humanize(status), tone: "muted" };
 }

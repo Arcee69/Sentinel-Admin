@@ -10,6 +10,7 @@ import { usePeopleDirectory } from "../hooks/api/usePeople";
 import { useUnitLineage } from "../hooks/useUnitNames";
 import { METHOD_LABEL } from "../lib/tasks";
 import { formatCount, formatDateTime, humanize } from "../lib/format";
+import { evidenceStatus, fileSize } from "../lib/media";
 import type { ReportType } from "../lib/data";
 import { saveBlob } from "../services/reports";
 import { errorMessage } from "../services/errors";
@@ -22,23 +23,6 @@ const TYPE_TONE: Record<ReportType, BadgeTone> = {
   Media: "warning",
   Distribution: "success",
 };
-
-function fileSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** Evidence downloads only after a clean scan and an approving review. */
-function evidenceStatus(m: MediaEvidence): { label: string; tone: BadgeTone; ready: boolean } {
-  if (m.review_state === "rejected") return { label: "Rejected", tone: "destructive", ready: false };
-  if (m.scan_state === "pending") return { label: "Awaiting scan", tone: "muted", ready: false };
-  if (m.scan_state !== "clean") {
-    return { label: `Scan: ${humanize(m.scan_state)}`, tone: "destructive", ready: false };
-  }
-  if (m.review_state === "approved") return { label: "Approved", tone: "success", ready: true };
-  return { label: "Awaiting review", tone: "warning", ready: false };
-}
 
 /** The full contents of one field report, with any evidence the agent attached. */
 export function FieldReportDialog({

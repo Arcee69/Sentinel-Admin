@@ -19,6 +19,7 @@ import { StatCard } from "../components/ui/StatCard";
 import { Input, Select } from "../components/ui/Field";
 import { TabPanel, TabsList } from "../components/ui/Tabs";
 import { ErrorState, LoadingRows } from "../components/ui/AsyncState";
+import { Pager } from "../components/ui/Pager";
 import {
   allContestsQuery,
   useAllContests,
@@ -121,44 +122,6 @@ function toRace(c: Contest) {
 }
 
 type Race = ReturnType<typeof toRace>;
-
-function Pager({
-  page,
-  pageCount,
-  onPage,
-  className,
-}: {
-  page: number;
-  pageCount: number;
-  onPage: (page: number) => void;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between border-t border-border text-xs text-muted-foreground",
-        className,
-      )}
-    >
-      <span>
-        Page {fmtNum(page + 1)} of {fmtNum(pageCount)}
-      </span>
-      <div className="flex gap-2">
-        <Button size="sm" variant="outline" disabled={page === 0} onClick={() => onPage(page - 1)}>
-          Previous
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={page + 1 >= pageCount}
-          onClick={() => onPage(page + 1)}
-        >
-          Next
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 export default function Elections() {
   const queryClient = useQueryClient();

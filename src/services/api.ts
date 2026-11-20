@@ -47,6 +47,7 @@ export const API = {
     registerDiscrepancies: (c: string) => `/campaigns/${c}/register-discrepancies`,
     operationsReport: (c: string) => `/campaigns/${c}/reports/operations`,
     exports: (c: string) => `/campaigns/${c}/exports`,
+    observerReports: (c: string) => `/campaigns/${c}/observer-reports`,
   },
 
   export: {

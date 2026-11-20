@@ -8,6 +8,7 @@ import { Badge } from "../components/ui/Badge";
 import { ErrorState, LoadingRows } from "../components/ui/AsyncState";
 import { TrendChart, type TrendSeries } from "../components/charts/TrendChart";
 import { SparkArea } from "../components/charts/SparkArea";
+import { ObserverReportsPanel } from "../components/reports/ObserverReportsPanel";
 import { useFilters } from "../context/FilterContext";
 import { useCampaignAnalytics, usePollingOccasions } from "../hooks/api/useDashboard";
 import { useIntelligenceSummary } from "../hooks/api/useIntelligence";
@@ -294,6 +295,12 @@ export default function Reports() {
           </p>
         </Panel>
       </div>
+
+      <ObserverReportsPanel
+        campaignId={campaignId}
+        stateId={scopeUnit?.id}
+        scopeLabel={scopeLabel}
+      />
     </>
   );
 }
